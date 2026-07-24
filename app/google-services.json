@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "000000000000",
-    "project_id": "envanter-placeholder",
-    "storage_bucket": "envanter-placeholder.appspot.com"
+    "project_number": "849818976833",
+    "project_id": "envanter-app-kaimau",
+    "storage_bucket": "envanter-app-kaimau.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "mobilesdk_app_id": "1:849818976833:android:63616e32410ee0c83d7cc0",
         "android_client_info": {
           "package_name": "com.envanter.app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyA-placeholder-key-0000000000000000"
+          "current_key": "AIzaSyDmWwat-1FPjijbpWAkZnOBkSSwBDDrg28"
         }
       ],
       "services": {

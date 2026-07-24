@@ -40,10 +40,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
 import com.envanter.app.data.FirebaseSync
 import com.envanter.app.data.Settings
 import com.envanter.app.data.ThemeMode
+import com.envanter.app.data.VoiceMode
 import com.envanter.app.gemini.GeminiClient
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
 
 @Composable
@@ -52,10 +59,39 @@ fun SettingsScreen() {
     val scope = rememberCoroutineScope()
 
     val themeMode by Settings.themeMode(context).collectAsState(initial = ThemeMode.SYSTEM)
+    val voiceMode by Settings.voiceMode(context).collectAsState(initial = VoiceMode.TAP)
     val savedKey by Settings.geminiKey(context).collectAsState(initial = "")
     val savedModel by Settings.geminiModel(context).collectAsState(initial = "gemini-2.0-flash")
     val notifEnabled by Settings.notifEnabled(context).collectAsState(initial = true)
     val syncStatus by FirebaseSync.status.collectAsState()
+    val userEmail by FirebaseSync.userEmail.collectAsState()
+    val webClientId = remember { FirebaseSync.webClientId(context) }
+    var googleError by remember { mutableStateOf("") }
+
+    fun signInWithGoogle() {
+        scope.launch {
+            googleError = ""
+            try {
+                val option = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(webClientId)
+                    .build()
+                val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+                val result = CredentialManager.create(context).getCredential(context, request)
+                val credential = result.credential
+                if (credential is CustomCredential &&
+                    credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                ) {
+                    val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    FirebaseSync.signInWithGoogle(idToken)
+                } else {
+                    googleError = "Beklenmeyen kimlik bilgisi türü."
+                }
+            } catch (e: GetCredentialException) {
+                googleError = "Giriş iptal edildi veya başarısız: ${e.message}"
+            }
+        }
+    }
 
     var keyInput by remember { mutableStateOf("") }
     var keyLoaded by remember { mutableStateOf(false) }
@@ -98,6 +134,28 @@ fun SettingsScreen() {
                             selected = themeMode == mode,
                             onClick = { scope.launch { Settings.setThemeMode(context, mode) } },
                             shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                            label = { Text(mode.label) }
+                        )
+                    }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Sesle Ekleme Modu", fontWeight = FontWeight.Bold)
+                Text(
+                    "Dokun: butona bas, konuş, sistem sessizlikte otomatik durur. " +
+                        "Basılı Tut: parmağın buton üzerindeyken dinler, çekince durur.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    VoiceMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = voiceMode == mode,
+                            onClick = { scope.launch { Settings.setVoiceMode(context, mode) } },
+                            shape = SegmentedButtonDefaults.itemShape(index, VoiceMode.entries.size),
                             label = { Text(mode.label) }
                         )
                     }
@@ -178,6 +236,37 @@ fun SettingsScreen() {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        if (FirebaseSync.isConfigured) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Hesap", fontWeight = FontWeight.Bold)
+                    when {
+                        webClientId.isBlank() -> Text(
+                            "Cihazlar arası aynı envanteri görmek için Firebase Console'da " +
+                                "Authentication → Sign-in method → Google'ı etkinleştirip " +
+                                "google-services.json'ı yeniden indirmen gerekiyor.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        userEmail != null -> {
+                            Text("Giriş yapıldı: $userEmail")
+                            Button(onClick = { FirebaseSync.signOut(context) }) { Text("Çıkış Yap") }
+                        }
+                        else -> {
+                            Text(
+                                "Şu an bu cihaza özel anonim senkron kullanılıyor. Google ile giriş " +
+                                    "yaparsan aynı hesapla girdiğin tüm cihazlar aynı envanteri paylaşır.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(onClick = { signInWithGoogle() }) { Text("Google ile Giriş Yap") }
+                        }
+                    }
+                    if (googleError.isNotBlank()) Text(googleError, color = MaterialTheme.colorScheme.error)
                 }
             }
         }

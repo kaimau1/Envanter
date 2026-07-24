@@ -1,14 +1,21 @@
 package com.envanter.app.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Bundle
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavHostController
 import com.envanter.app.data.CategoryStore
@@ -60,6 +69,7 @@ import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import com.envanter.app.data.UNITS
+import com.envanter.app.data.VoiceMode
 import com.envanter.app.gemini.GeminiClient
 import com.envanter.app.util.ParsedProduct
 import com.envanter.app.util.TextParse
@@ -199,6 +209,62 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
             .onFailure { status = "Ses tanıma bu cihazda kullanılamıyor." }
     }
 
+    // Basılı-tut modu: sistem diyaloğu yerine SpeechRecognizer'ı doğrudan sür,
+    // parmak butondayken dinler, çekilince durur.
+    val voiceMode by Settings.voiceMode(context).collectAsState(initial = VoiceMode.TAP)
+    val holdInteraction = remember { MutableInteractionSource() }
+    val isHoldPressed by holdInteraction.collectIsPressedAsState()
+    var recordAudioGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val recognizer = remember {
+        SpeechRecognizer.createSpeechRecognizer(context).apply {
+            setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) { status = "Dinleniyor…" }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onError(error: Int) {
+                    if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_CLIENT) {
+                        status = "Ses tanıma hatası ($error)"
+                    }
+                }
+                override fun onResults(results: Bundle?) {
+                    val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    if (!spoken.isNullOrBlank()) scope.launch { analyzeSpeech(spoken) }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+        }
+    }
+    val recordAudioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        recordAudioGranted = granted
+        if (!granted) status = "Basılı tut modu için mikrofon izni gerekiyor."
+    }
+
+    fun startHoldListening() {
+        if (!recordAudioGranted) { recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO); return }
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
+        }
+        runCatching { recognizer.startListening(i) }
+    }
+    fun stopHoldListening() {
+        runCatching { recognizer.stopListening() }
+    }
+    LaunchedEffect(isHoldPressed) {
+        if (voiceMode == VoiceMode.HOLD) {
+            if (isHoldPressed) startHoldListening() else stopHoldListening()
+        }
+    }
+    DisposableEffect(Unit) { onDispose { recognizer.destroy() } }
+
     var autoLaunched by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(mode) {
         if (!autoLaunched) {
@@ -250,9 +316,14 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                     Icon(Icons.Filled.PhotoCamera, null)
                     Text(" Fotoğrafla Tara")
                 }
-                OutlinedButton(onClick = { launchSpeech() }, modifier = Modifier.weight(1f), enabled = !busy) {
+                OutlinedButton(
+                    onClick = { if (voiceMode == VoiceMode.TAP) launchSpeech() },
+                    interactionSource = holdInteraction,
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy
+                ) {
                     Icon(Icons.Filled.KeyboardVoice, null)
-                    Text(" Sesle Söyle")
+                    Text(if (voiceMode == VoiceMode.HOLD) " Basılı Tut, Konuş" else " Sesle Söyle")
                 }
             }
             if (busy) {
