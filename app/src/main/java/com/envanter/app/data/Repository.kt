@@ -22,10 +22,40 @@ object Repository {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        // Kategorileri yükle; tablo boşsa varsayılanları tohumla.
+        scope.launch {
+            if (categoryDao.count() == 0) categoryDao.upsertAll(CategoryStore.DEFAULTS)
+            CategoryStore.update(categoryDao.getAll())
+        }
+        scope.launch {
+            categoryDao.observeAll().collect { list ->
+                if (list.isNotEmpty()) {
+                    CategoryStore.update(list)
+                    refreshWidgets()
+                }
+            }
+        }
         FirebaseSync.start(appContext)
     }
 
     private val dao get() = AppDb.get(appContext).foodDao()
+    private val categoryDao get() = AppDb.get(appContext).categoryDao()
+
+    suspend fun categories(): List<CategoryDef> = categoryDao.getAll()
+
+    /** Kategori ekler/günceller (Gemini veya elle). */
+    suspend fun saveCategory(def: CategoryDef) {
+        categoryDao.upsert(def)
+        CategoryStore.update(categoryDao.getAll())
+        refreshWidgets()
+    }
+
+    suspend fun saveCategories(defs: List<CategoryDef>) {
+        if (defs.isEmpty()) return
+        categoryDao.upsertAll(defs)
+        CategoryStore.update(categoryDao.getAll())
+        refreshWidgets()
+    }
 
     fun observeItems(): Flow<List<FoodItem>> = dao.observeAll()
 

@@ -1,6 +1,7 @@
 package com.envanter.app.util
 
-import com.envanter.app.data.Category
+import com.envanter.app.data.CategoryDef
+import com.envanter.app.data.CategoryStore
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -10,7 +11,7 @@ data class ParsedProduct(
     val quantity: Double? = null,
     val unit: String? = null,
     val expiry: LocalDate? = null,
-    val category: Category? = null
+    val category: CategoryDef? = null
 )
 
 /**
@@ -101,7 +102,7 @@ object TextParse {
             quantity = qty,
             unit = unit,
             expiry = expiry,
-            category = cleanName?.let { Category.guess(it) }
+            category = cleanName?.let { CategoryStore.guess(it) }
         )
     }
 
@@ -118,7 +119,7 @@ object TextParse {
         return ParsedProduct(
             name = name,
             expiry = expiry,
-            category = name?.let { Category.guess(it) }
+            category = name?.let { CategoryStore.guess(it) }
         )
     }
 

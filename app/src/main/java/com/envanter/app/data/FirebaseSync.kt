@@ -71,7 +71,7 @@ object FirebaseSync {
                     val item = FoodItem(
                         id = doc.id,
                         name = doc.getString("name") ?: "",
-                        category = doc.getString("category") ?: Category.DIGER.name,
+                        category = doc.getString("category") ?: CategoryStore.DEFAULT_ID,
                         quantity = doc.getDouble("quantity") ?: 1.0,
                         unit = doc.getString("unit") ?: "adet",
                         expiryDate = doc.getString("expiryDate") ?: "",

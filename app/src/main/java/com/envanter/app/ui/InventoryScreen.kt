@@ -40,7 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
-import com.envanter.app.data.Category
+import com.envanter.app.data.CategoryDef
+import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.SortOption
 import com.envanter.app.data.Urgency
@@ -55,16 +56,17 @@ import com.envanter.app.util.Fuzzy
 @Composable
 fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
     val all by Repository.observeItems().collectAsState(initial = emptyList())
+    val categories by CategoryStore.flow.collectAsState()
 
     var query by remember { mutableStateOf("") }
-    var selectedCat by remember { mutableStateOf<Category?>(null) }
+    var selectedCatId by remember { mutableStateOf<String?>(null) }
     var sort by remember { mutableStateOf(SortOption.EXPIRY_ASC) }
     var urgencyFilter by remember(urgencyArg) {
         mutableStateOf(runCatching { if (urgencyArg.isBlank()) null else Urgency.valueOf(urgencyArg) }.getOrNull())
     }
     val filtered = sort.sort(
         all
-            .filter { selectedCat == null || it.categoryEnum == selectedCat }
+            .filter { selectedCatId == null || it.category == selectedCatId }
             .filter { urgencyFilter == null || it.urgency == urgencyFilter }
             .filter { query.isBlank() || Fuzzy.matches(query, it.name) }
     )
@@ -101,7 +103,7 @@ fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
                     .padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                CategoryDropdown(selectedCat, Modifier.weight(1f)) { selectedCat = it }
+                CategoryDropdown(selectedCatId, categories, Modifier.weight(1f)) { selectedCatId = it }
                 Box(Modifier.weight(1f)) { SortDropdown(sort) { sort = it } }
             }
 
@@ -159,8 +161,14 @@ fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
 }
 
 @Composable
-private fun CategoryDropdown(selected: Category?, modifier: Modifier, onSelect: (Category?) -> Unit) {
+private fun CategoryDropdown(
+    selectedId: String?,
+    categories: List<CategoryDef>,
+    modifier: Modifier,
+    onSelect: (String?) -> Unit
+) {
     var open by remember { mutableStateOf(false) }
+    val selected = selectedId?.let { id -> categories.firstOrNull { it.id == id } }
     val label = selected?.let { "${it.emoji} ${it.label}" } ?: "Tüm kategoriler"
     Box(modifier) {
         OutlinedButton(
@@ -176,10 +184,10 @@ private fun CategoryDropdown(selected: Category?, modifier: Modifier, onSelect: 
                 text = { Text("Tüm kategoriler", fontWeight = FontWeight.SemiBold) },
                 onClick = { onSelect(null); open = false }
             )
-            Category.entries.forEach { cat ->
+            categories.forEach { cat ->
                 DropdownMenuItem(
                     text = { Text("${cat.emoji} ${cat.label}") },
-                    onClick = { onSelect(cat); open = false }
+                    onClick = { onSelect(cat.id); open = false }
                 )
             }
         }

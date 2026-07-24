@@ -19,6 +19,9 @@ sade ve pratik bir Android uygulaması.
 - **Dashboard kartları filtreler:** "Süresi geçti / Çok yakın / Yaklaşıyor" kartına dokununca
   envanter otomatik o gruba filtrelenir
 - **Bildirimler:** tarihi kritikleşen ürünler için günde 2 kez otomatik uyarı
+- **Dinamik kategoriler:** kategoriler artık sabit değil, veritabanında tutulur. Gemini
+  "kategorileri düzelt" ile yeni kategori ekleyebilir (kendi kırmızı/sarı gün eşikleriyle),
+  mevcut kategorilerin eşiklerini düzenleyebilir ve ürünleri yeniden atayabilir — hepsi tek istekte
 - **Gemini asistan:** API anahtarını girince model listesi otomatik çekilir; "ne pişirsem",
   "önce ne tüketeyim" gibi analizler yapılır. Fotoğraf ve ses tanıma da anahtar girilince
   Gemini ile daha isabetli çalışır (anahtar yoksa cihaz-içi OCR kullanılır).

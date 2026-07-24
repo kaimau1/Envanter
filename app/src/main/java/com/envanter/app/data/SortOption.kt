@@ -14,6 +14,6 @@ enum class SortOption(val label: String) {
             .thenByDescending { it.daysLeft ?: Long.MIN_VALUE })
         NAME_ASC -> items.sortedBy { it.name.lowercase() }
         RECENT -> items.sortedByDescending { it.updatedAt }
-        CATEGORY -> items.sortedWith(compareBy({ it.categoryEnum.ordinal }, { it.daysLeft ?: Long.MAX_VALUE }))
+        CATEGORY -> items.sortedWith(compareBy({ it.categoryEnum.sortOrder }, { it.daysLeft ?: Long.MAX_VALUE }))
     }
 }

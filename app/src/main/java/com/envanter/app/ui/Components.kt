@@ -61,9 +61,16 @@ fun GeminiFixButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
                     busy = true
                     status = "Gemini tüm envanteri inceliyor…"
                     CategoryFixer.run(context)
-                        .onSuccess { n ->
-                            status = if (n == 0) "Her şey doğru görünüyor, değişiklik gerekmedi ✓"
-                            else "$n ürünün kategorisi düzeltildi ✓ (renk uyarıları da güncellendi)"
+                        .onSuccess { s ->
+                            status = if (s.total == 0) "Her şey doğru görünüyor, değişiklik gerekmedi ✓"
+                            else buildString {
+                                append("Güncellendi ✓ ")
+                                val parts = mutableListOf<String>()
+                                if (s.itemsChanged > 0) parts += "${s.itemsChanged} ürün yeniden kategorilendi"
+                                if (s.categoriesAdded > 0) parts += "${s.categoriesAdded} yeni kategori eklendi"
+                                if (s.categoriesEdited > 0) parts += "${s.categoriesEdited} kategori eşiği düzeltildi"
+                                append(parts.joinToString(", "))
+                            }
                         }
                         .onFailure { status = it.message ?: "Bir hata oluştu." }
                     busy = false

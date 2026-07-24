@@ -1,7 +1,8 @@
 package com.envanter.app.gemini
 
 import android.util.Base64
-import com.envanter.app.data.Category
+import com.envanter.app.data.CategoryDef
+import com.envanter.app.data.CategoryStore
 import com.envanter.app.util.ParsedProduct
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,9 +15,15 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
+/** Gemini'nin envanter incelemesi sonucu: güncel/yeni kategoriler + ürün atamaları. */
+data class InventoryReview(
+    val categories: List<CategoryDef>,
+    val itemCategories: Map<String, String>
+)
+
 /**
  * Gemini REST istemcisi. Model listesi API'den otomatik çekilir,
- * seçilen modelle metin ve görsel analizi yapılır.
+ * seçilen modelle metin/görsel analizi ve toplu envanter incelemesi yapılır.
  */
 object GeminiClient {
     private const val BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -84,59 +91,115 @@ object GeminiClient {
         runCatching { JSONObject(body).getJSONObject("error").getString("message") }
             .getOrDefault("HTTP $code")
 
-    private const val EXTRACT_PROMPT =
-        "Bu bir gıda ürünü bilgisidir. Ürün adını, miktarını, birimini, son kullanma tarihini ve kategorisini çıkar. " +
+    private fun extractPrompt(): String {
+        val cats = CategoryStore.all.joinToString(", ") { it.id }
+        return "Bu bir gıda ürünü bilgisidir. Ürün adını, miktarını, birimini, son kullanma tarihini ve kategorisini çıkar. " +
             "SADECE şu JSON formatında yanıt ver, başka hiçbir şey yazma: " +
             """{"name":"...","quantity":1,"unit":"adet","expiry":"yyyy-MM-dd","category":"..."} """ +
-            "Kategori şunlardan biri olmalı: SUT_URUNLERI, ET_TAVUK_BALIK, MEYVE_SEBZE, EKMEK_UNLU, DONDURULMUS, KONSERVE, BAKLIYAT_KURU, ATISTIRMALIK, ICECEK, KAHVALTILIK, SOS_BAHARAT, DIGER. " +
+            "Kategori şunlardan biri olmalı: $cats. " +
             "Bilinmeyen alanları null yap. Bugünün tarihi: "
+    }
 
     /** Fotoğraftan ürün bilgisi çıkarma (Gemini vision). */
     suspend fun extractFromImage(apiKey: String, model: String, jpegBytes: ByteArray): Result<ParsedProduct> {
         val b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-        return generate(apiKey, model, EXTRACT_PROMPT + LocalDate.now() + "\nGörseldeki ürünü analiz et.", b64)
+        return generate(apiKey, model, extractPrompt() + LocalDate.now() + "\nGörseldeki ürünü analiz et.", b64)
             .mapCatching { parseProductJson(it) }
     }
 
     /** Serbest metinden (ses kaydı dökümü) ürün bilgisi çıkarma. */
     suspend fun extractFromText(apiKey: String, model: String, text: String): Result<ParsedProduct> =
-        generate(apiKey, model, EXTRACT_PROMPT + LocalDate.now() + "\nMetin: \"$text\"")
+        generate(apiKey, model, extractPrompt() + LocalDate.now() + "\nMetin: \"$text\"")
             .mapCatching { parseProductJson(it) }
 
-    private val VALID_CATS = Category.entries.filter { it != Category.DIGER }
-        .joinToString(", ") { it.name }
-
     /**
-     * Tüm envanteri Gemini'ye gönderip her ürün için en doğru kategoriyi ister.
-     * items: (id, ad) çiftleri. Dönen: id -> Category (yalnız güvenli eşleşmeler).
+     * Tüm envanteri TEK istekte inceletir. Gemini:
+     *  - her ürünü doğru kategoriye atar,
+     *  - gerekirse YENİ kategori önerir (kendi kırmızı/sarı gün eşikleriyle),
+     *  - mevcut kategorilerin eşiklerini düzenleyebilir.
+     * items: (id, ad) çiftleri.
      */
-    suspend fun fixCategories(
+    suspend fun reviewInventory(
         apiKey: String,
         model: String,
+        currentCategories: List<CategoryDef>,
         items: List<Pair<String, String>>
-    ): Result<Map<String, Category>> {
-        if (items.isEmpty()) return Result.success(emptyMap())
-        val list = items.joinToString("\n") { "${it.first} | ${it.second}" }
-        val prompt = "Aşağıda bir mutfak envanterindeki ürünler var (id | ad). " +
-            "Her ürün için en uygun gıda kategorisini seç. " +
-            "SADECE şu JSON dizisini döndür, başka metin yazma: " +
-            """[{"id":"...","category":"KATEGORI"}] """ +
-            "KATEGORI şunlardan biri olmalı: $VALID_CATS, DIGER.\n\nÜrünler:\n$list"
+    ): Result<InventoryReview> {
+        if (items.isEmpty()) return Result.success(InventoryReview(emptyList(), emptyMap()))
+        val catLines = currentCategories.joinToString("\n") {
+            "${it.id} | ${it.label} | kırmızı<=${it.redDays}gün | sarı<=${it.yellowDays}gün"
+        }
+        val itemLines = items.joinToString("\n") { "${it.first} | ${it.second}" }
+        val prompt = buildString {
+            append("Bir mutfak envanteri asistanısın. Aşağıda mevcut kategoriler ve ürünler var.\n\n")
+            append("MEVCUT KATEGORİLER (id | ad | kırmızı eşiği | sarı eşiği):\n$catLines\n\n")
+            append("ÜRÜNLER (id | ad):\n$itemLines\n\n")
+            append("Görevin:\n")
+            append("1) Her ürünü en doğru kategoriye ata.\n")
+            append("2) Ürünler mevcut kategorilere iyi oturmuyorsa YENİ kategori ekleyebilirsin; ")
+            append("yeni kategoriye o gıda türüne uygun kırmızı ve sarı gün eşiği ver ")
+            append("(ör. çabuk bozulan taze ürünler kısa, konserve/kuru gıda uzun).\n")
+            append("3) Mevcut bir kategorinin gün eşiği ürün türüne göre yanlışsa düzeltebilirsin.\n\n")
+            append("SADECE şu JSON'u döndür, başka metin yazma:\n")
+            append("""{"categories":[{"id":"KISA_BUYUK_HARF_ID","label":"Ad","emoji":"🍎","redDays":3,"yellowDays":7,"keywords":["kelime1","kelime2"]}],""")
+            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID"}]}""")
+            append("\nNot: categories listesine sadece YENİ veya DEĞİŞTİRDİĞİN kategorileri koy. ")
+            append("id'ler büyük harf ve alt çizgili olsun (ör. BEBEK_MAMASI). Bugünün tarihi: ")
+            append(LocalDate.now())
+        }
         return generate(apiKey, model, prompt).mapCatching { raw ->
             val cleaned = raw.trim()
                 .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-            val start = cleaned.indexOf('[')
-            val end = cleaned.lastIndexOf(']')
-            require(start >= 0 && end > start) { "JSON dizisi bulunamadı" }
-            val arr = JSONArray(cleaned.substring(start, end + 1))
-            val map = mutableMapOf<String, Category>()
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                val id = o.optString("id").takeIf { it.isNotBlank() } ?: continue
-                val cat = Category.fromGemini(o.optString("category")) ?: continue
-                map[id] = cat
+            val start = cleaned.indexOf('{')
+            val end = cleaned.lastIndexOf('}')
+            require(start >= 0 && end > start) { "JSON bulunamadı" }
+            val root = JSONObject(cleaned.substring(start, end + 1))
+
+            val existingById = currentCategories.associateBy { it.id }
+            val maxOrder = (currentCategories.maxOfOrNull { it.sortOrder } ?: 0)
+            val cats = mutableListOf<CategoryDef>()
+            root.optJSONArray("categories")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val id = o.optString("id").takeIf { it.isNotBlank() }
+                        ?.uppercase()?.replace(Regex("[^A-Z0-9]+"), "_")?.trim('_') ?: continue
+                    if (id == CategoryStore.DEFAULT_ID) continue
+                    val existing = existingById[id]
+                    val red = o.optInt("redDays", existing?.redDays ?: 7).coerceIn(0, 3650)
+                    var yellow = o.optInt("yellowDays", existing?.yellowDays ?: 30).coerceIn(0, 3650)
+                    if (yellow < red) yellow = red
+                    val kwFromJson = o.optJSONArray("keywords")?.let { k ->
+                        (0 until k.length()).joinToString(",") { k.optString(it).trim() }
+                    }.orEmpty()
+                    val keywords = when {
+                        existing != null && kwFromJson.isBlank() -> existing.keywords
+                        existing != null -> (existing.keywordList + kwFromJson.split(",")).map { it.trim() }
+                            .filter { it.isNotBlank() }.distinct().joinToString(",")
+                        else -> kwFromJson
+                    }
+                    cats += CategoryDef(
+                        id = id,
+                        label = o.optString("label").takeIf { it.isNotBlank() } ?: existing?.label ?: id,
+                        emoji = o.optString("emoji").takeIf { it.isNotBlank() } ?: existing?.emoji ?: "📦",
+                        redDays = red,
+                        yellowDays = yellow,
+                        keywords = keywords,
+                        sortOrder = existing?.sortOrder ?: (maxOrder + 1 + i)
+                    )
+                }
             }
-            map
+
+            val map = mutableMapOf<String, String>()
+            root.optJSONArray("items")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val id = o.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    val catRaw = o.optString("category").takeIf { it.isNotBlank() } ?: continue
+                    val catId = catRaw.uppercase().replace(Regex("[^A-Z0-9]+"), "_").trim('_')
+                    map[id] = catId
+                }
+            }
+            InventoryReview(cats, map)
         }
     }
 
@@ -149,12 +212,11 @@ object GeminiClient {
         val o = JSONObject(cleaned.substring(start, end + 1))
         fun str(k: String): String? = if (o.isNull(k)) null else o.optString(k).takeIf { it.isNotBlank() && it != "null" }
         val name = str("name")
-        // Gemini'nin döndürdüğü kategori enum/eş anlamlıya eşlenir; tutmazsa ada göre
-        // yerel tahmine düşülür. Böylece beklenmedik bir kategori metni DIGER'e sıkışmaz.
-        val geminiCat = Category.fromGemini(str("category"))
+        // Gemini kategorisi eşleşmezse ada göre yerel tahmine düşülür.
+        val geminiCat = CategoryStore.fromGemini(str("category"))
         val category = when {
-            geminiCat != null && geminiCat != Category.DIGER -> geminiCat
-            name != null -> Category.guess(name).takeIf { it != Category.DIGER } ?: geminiCat
+            geminiCat != null && geminiCat.id != CategoryStore.DEFAULT_ID -> geminiCat
+            name != null -> CategoryStore.guess(name).takeIf { it.id != CategoryStore.DEFAULT_ID } ?: geminiCat
             else -> geminiCat
         }
         return ParsedProduct(

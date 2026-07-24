@@ -10,7 +10,7 @@ import java.util.UUID
 data class FoodItem(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val name: String = "",
-    val category: String = Category.DIGER.name,
+    val category: String = CategoryStore.DEFAULT_ID,
     val quantity: Double = 1.0,
     val unit: String = "adet",
     /** ISO-8601 (yyyy-MM-dd). Boş ise tarih bilinmiyor demektir. */
@@ -19,7 +19,8 @@ data class FoodItem(
     val updatedAt: Long = System.currentTimeMillis(),
     val deleted: Boolean = false
 ) {
-    val categoryEnum: Category get() = Category.fromName(category)
+    /** Ürünün ait olduğu (dinamik) kategori tanımı. */
+    val categoryEnum: CategoryDef get() = CategoryStore.byId(category)
 
     val expiry: LocalDate? get() = runCatching { LocalDate.parse(expiryDate) }.getOrNull()
 

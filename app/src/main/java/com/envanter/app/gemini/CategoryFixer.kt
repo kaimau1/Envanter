@@ -1,35 +1,61 @@
 package com.envanter.app.gemini
 
 import android.content.Context
+import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import kotlinx.coroutines.flow.first
 
+/** Toplu düzeltme sonucu özeti. */
+data class FixSummary(val itemsChanged: Int, val categoriesAdded: Int, val categoriesEdited: Int) {
+    val total get() = itemsChanged + categoriesAdded + categoriesEdited
+}
+
 /**
- * Tüm envanteri TEK bir Gemini isteğiyle (batch) inceleyip yanlış kategorileri
- * düzeltir. Ürünler tek tek gönderilmez — token tasarrufu için hepsi bir liste
- * olarak tek çağrıda işlenir. Dönen değer: değiştirilen ürün sayısı.
+ * Tüm envanteri TEK bir Gemini isteğiyle (batch) inceletir; ürünler tek tek
+ * gönderilmez (token tasarrufu). Gemini:
+ *  - yanlış kategorileri düzeltir,
+ *  - gerekirse kendi gün eşikleriyle yeni kategori ekler,
+ *  - mevcut kategorilerin eşiklerini düzenleyebilir.
  */
 object CategoryFixer {
     class NoApiKey : Exception("Önce Ayarlar'dan Gemini API anahtarını ekle.")
 
-    suspend fun run(context: Context): Result<Int> {
+    suspend fun run(context: Context): Result<FixSummary> {
         val key = Settings.geminiKey(context).first()
         if (key.isBlank()) return Result.failure(NoApiKey())
         val model = Settings.geminiModel(context).first()
-        val current = Repository.items()
-        if (current.isEmpty()) return Result.success(0)
-        return GeminiClient.fixCategories(key, model, current.map { it.id to it.name })
-            .map { map ->
+        val items = Repository.items()
+        if (items.isEmpty()) return Result.success(FixSummary(0, 0, 0))
+        val currentCats = Repository.categories().ifEmpty { CategoryStore.all }
+
+        return GeminiClient.reviewInventory(key, model, currentCats, items.map { it.id to it.name })
+            .map { review ->
+                // 1) Kategori ekleme/düzenleme
+                val existingById = currentCats.associateBy { it.id }
+                var added = 0
+                var edited = 0
+                review.categories.forEach { def ->
+                    val old = existingById[def.id]
+                    when {
+                        old == null -> added++
+                        old.redDays != def.redDays || old.yellowDays != def.yellowDays ||
+                            old.label != def.label || old.emoji != def.emoji -> edited++
+                    }
+                }
+                if (review.categories.isNotEmpty()) Repository.saveCategories(review.categories)
+
+                // 2) Ürün atamaları (yalnız geçerli kategoriye)
+                val validIds = (currentCats.map { it.id } + review.categories.map { it.id }).toSet()
                 var changed = 0
-                current.forEach { item ->
-                    val newCat = map[item.id]
-                    if (newCat != null && newCat.name != item.category) {
-                        Repository.save(item.copy(category = newCat.name))
+                items.forEach { item ->
+                    val newCat = review.itemCategories[item.id]
+                    if (newCat != null && newCat in validIds && newCat != item.category) {
+                        Repository.save(item.copy(category = newCat))
                         changed++
                     }
                 }
-                changed
+                FixSummary(changed, added, edited)
             }
     }
 }

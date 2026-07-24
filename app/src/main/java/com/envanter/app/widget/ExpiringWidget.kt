@@ -29,6 +29,7 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.envanter.app.MainActivity
 import com.envanter.app.data.AppDb
+import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Urgency
 
@@ -39,6 +40,11 @@ import com.envanter.app.data.Urgency
 class ExpiringWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        // Renk/emoji doğruluğu için dinamik kategorileri senkron tazele.
+        runCatching {
+            val cats = AppDb.get(context).categoryDao().getAll()
+            if (cats.isNotEmpty()) CategoryStore.update(cats)
+        }
         val items = runCatching {
             AppDb.get(context).foodDao().getAll()
                 .filter { it.daysLeft != null }

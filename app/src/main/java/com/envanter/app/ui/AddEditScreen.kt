@@ -43,6 +43,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,7 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.navigation.NavHostController
-import com.envanter.app.data.Category
+import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
@@ -98,8 +99,9 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val categories by CategoryStore.flow.collectAsState()
     var name by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf(Category.DIGER.name) }
+    var category by rememberSaveable { mutableStateOf(CategoryStore.DEFAULT_ID) }
     var qtyText by rememberSaveable { mutableStateOf("1") }
     var unit by rememberSaveable { mutableStateOf("adet") }
     var expiry by rememberSaveable { mutableStateOf("") }
@@ -132,10 +134,10 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         p.unit?.let { unit = it }
         p.expiry?.let { expiry = it.toString() }
         // Kategori: önce ayrıştırıcının verdiği (DIGER değilse), yoksa isimden yerel tahmin.
-        val resolved = p.category?.takeIf { it != Category.DIGER }
-            ?: p.name?.let { Category.guess(it) }?.takeIf { it != Category.DIGER }
+        val resolved = p.category?.takeIf { it.id != CategoryStore.DEFAULT_ID }
+            ?: p.name?.let { CategoryStore.guess(it) }?.takeIf { it.id != CategoryStore.DEFAULT_ID }
         if (resolved != null) {
-            category = resolved.name
+            category = resolved.id
             userTouchedCategory = true
         }
         status = if (p.name == null && p.expiry == null)
@@ -211,7 +213,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
     // Ad değiştikçe kategori tahmini (kullanıcı elle seçmediyse)
     LaunchedEffect(name) {
         if (!userTouchedCategory && name.length >= 3) {
-            category = Category.guess(name).name
+            category = CategoryStore.guess(name).id
         }
     }
 
@@ -272,7 +274,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
 
             Box {
                 OutlinedTextField(
-                    value = Category.fromName(category).let { "${it.emoji} ${it.label}" },
+                    value = CategoryStore.byId(category).let { "${it.emoji} ${it.label}" },
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Kategori") },
@@ -288,11 +290,11 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                     expanded = catExpanded,
                     onDismissRequest = { catExpanded = false }
                 ) {
-                    Category.entries.forEach { cat ->
+                    categories.forEach { cat ->
                         DropdownMenuItem(
                             text = { Text("${cat.emoji} ${cat.label}") },
                             onClick = {
-                                category = cat.name
+                                category = cat.id
                                 userTouchedCategory = true
                                 catExpanded = false
                             }
@@ -367,8 +369,8 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                     // Güvenlik ağı: kullanıcı kategoriyi elle seçmediyse ve mevcut kategori
                     // DIGER ise, isimden son bir tahmin dene.
                     val finalCategory =
-                        if (!userTouchedCategory && category == Category.DIGER.name)
-                            Category.guess(finalName).name
+                        if (!userTouchedCategory && category == CategoryStore.DEFAULT_ID)
+                            CategoryStore.guess(finalName).id
                         else category
                     scope.launch {
                         val base = if (isEdit) Repository.get(itemId!!) else null
