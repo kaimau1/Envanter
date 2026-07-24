@@ -5,8 +5,18 @@ sade ve pratik bir Android uygulaması.
 
 ## Özellikler
 
-- **Üç yolla ürün ekleme:** elle, 📷 fotoğrafla (etiket/tarih otomatik taranır), 🎤 sesle
-  ("3 adet süt son kullanma 12 ağustos" demen yeterli)
+- **Beş yolla ürün ekleme:** elle, 📷 fotoğrafla (etiket/tarih otomatik taranır), 🎤 sesle
+  ("3 adet süt son kullanma 12 ağustos" demen yeterli), 🎥 videoyla ve 🖼️ galeriden
+- **Toplu ekleme (çoklu ürün):** tek seferde birden fazla ürün eklenir —
+  - 🎥 **Videodan:** markette/mutfakta çektiğin videoyu Gemini baştan sona izler, gördüğü
+    tüm ürünleri çıkarır (aynı ürün birçok karede görünse bile tek kayıt olur)
+  - 🖼️ **Galeriden:** tek fotoğrafta birden çok ürün olabilir; ayrıca aynı anda 20 fotoğrafa
+    kadar seçip hepsini tek istekte analiz ettirebilirsin
+  - 🎤 **Sesle:** "2 litre süt, 3 adet yumurta ve bir paket ekmek" dersen üçü de ayrı ayrı eklenir
+  - Bulunanlar önce bir **kontrol listesinde** gösterilir: adını/kategorisini/miktarını/tarihini
+    düzeltip istemediklerinin işaretini kaldırabilir, sonra hepsini tek dokunuşla eklersin
+  - Video ya da fotoğrafta tarih okunamazsa Gemini o ürüne makul bir raf ömrü tahmini yazar
+    (tahmini tarihler `~` ile işaretlenir)
 - **Renk kodlu envanter:** tarihi çok yaklaşan/geçen ürünler 🔴 kırmızı, yaklaşanlar 🟡 sarı,
   sorunsuzlar normal görünür
 - **Kategoriye özel eşikler:** konservede 6 ay kala sarı, süt ürünlerinde 5 gün kala sarı,
@@ -81,6 +91,8 @@ Ayrıca repoyu **Watch → Custom → Releases** yaparsan GitHub da her release'
 - Kotlin + Jetpack Compose (Material 3), tek modül
 - Room (yerel veritabanı, çevrimdışı-öncelikli) + Firestore (senkron)
 - ML Kit cihaz-içi OCR, Android ses tanıma, Gemini REST API
+  (çoklu görsel `inline_data`, video için Files API resumable upload)
+- Android Photo Picker (izin gerektirmez), kamera foto/video çekimi (FileProvider)
 - Glance ana ekran widget'ı, WorkManager bildirimleri
 - İmza: `app/keystore/envanter-release.keystore` (sabit; debug ve release aynı imzayı kullanır)
 

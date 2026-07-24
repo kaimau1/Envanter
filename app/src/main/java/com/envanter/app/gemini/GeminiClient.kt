@@ -6,13 +6,16 @@ import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.ShelfLife
 import com.envanter.app.util.ParsedProduct
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
@@ -31,11 +34,23 @@ data class InventoryReview(
  */
 object GeminiClient {
     private const val BASE = "https://generativelanguage.googleapis.com/v1beta"
+    private const val UPLOAD_BASE = "https://generativelanguage.googleapis.com/upload/v1beta"
+
+    /** Tek istekte gönderilen en fazla fotoğraf; fazlası parçalara bölünür. */
+    const val MAX_IMAGES_PER_REQUEST = 8
+
+    /** Bu boyutun altındaki videolar doğrudan (inline) gönderilir, üstündekiler Files API ile yüklenir. */
+    private const val INLINE_VIDEO_LIMIT = 14L * 1024 * 1024
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .writeTimeout(300, TimeUnit.SECONDS)
         .build()
     private val JSON_MT = "application/json; charset=utf-8".toMediaType()
+
+    /** İstek gövdesine eklenecek görsel/video parçası: ya inline base64 ya da yüklenmiş dosya. */
+    private data class MediaPart(val mime: String, val base64: String? = null, val fileUri: String? = null)
 
     /** generateContent destekleyen modellerin adlarını döndürür. */
     suspend fun listModels(apiKey: String): Result<List<String>> = withContext(Dispatchers.IO) {
@@ -60,36 +75,123 @@ object GeminiClient {
     }
 
     suspend fun generate(apiKey: String, model: String, prompt: String, imageBase64: String? = null): Result<String> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val parts = JSONArray()
-                parts.put(JSONObject().put("text", prompt))
-                if (imageBase64 != null) {
-                    parts.put(
+        generateWithMedia(
+            apiKey, model, prompt,
+            listOfNotNull(imageBase64?.let { MediaPart("image/jpeg", base64 = it) })
+        )
+
+    private suspend fun generateWithMedia(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        media: List<MediaPart>
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val parts = JSONArray()
+            parts.put(JSONObject().put("text", prompt))
+            media.forEach { m ->
+                when {
+                    m.base64 != null -> parts.put(
                         JSONObject().put(
                             "inline_data",
-                            JSONObject().put("mime_type", "image/jpeg").put("data", imageBase64)
+                            JSONObject().put("mime_type", m.mime).put("data", m.base64)
+                        )
+                    )
+                    m.fileUri != null -> parts.put(
+                        JSONObject().put(
+                            "file_data",
+                            JSONObject().put("mime_type", m.mime).put("file_uri", m.fileUri)
                         )
                     )
                 }
-                val payload = JSONObject().put(
-                    "contents",
-                    JSONArray().put(JSONObject().put("parts", parts))
-                )
-                val req = Request.Builder()
-                    .url("$BASE/models/$model:generateContent?key=$apiKey")
-                    .post(payload.toString().toRequestBody(JSON_MT))
-                    .build()
-                http.newCall(req).execute().use { resp ->
-                    val body = resp.body?.string().orEmpty()
-                    if (!resp.isSuccessful) error(apiError(body, resp.code))
-                    JSONObject(body)
-                        .getJSONArray("candidates").getJSONObject(0)
-                        .getJSONObject("content").getJSONArray("parts")
-                        .getJSONObject(0).getString("text")
-                }
+            }
+            val payload = JSONObject().put(
+                "contents",
+                JSONArray().put(JSONObject().put("parts", parts))
+            )
+            val req = Request.Builder()
+                .url("$BASE/models/$model:generateContent?key=$apiKey")
+                .post(payload.toString().toRequestBody(JSON_MT))
+                .build()
+            http.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error(apiError(body, resp.code))
+                val candidate = JSONObject(body).optJSONArray("candidates")?.optJSONObject(0)
+                    ?: error("Model yanıt vermedi")
+                val textParts = candidate.optJSONObject("content")?.optJSONArray("parts")
+                    ?: error("Model boş yanıt döndü")
+                // Düşünme adımı olan modeller birden fazla parça döndürebiliyor: hepsini birleştir.
+                (0 until textParts.length())
+                    .mapNotNull { textParts.optJSONObject(it)?.optString("text")?.takeIf { t -> t.isNotBlank() } }
+                    .joinToString("\n")
+                    .ifBlank { error("Model boş yanıt döndü") }
             }
         }
+    }
+
+    /**
+     * Büyük dosyaları (video) Files API ile yükler ve işlenmesini bekler.
+     * Dönen değer generateContent'te `file_data.file_uri` olarak kullanılır.
+     */
+    private suspend fun uploadFile(
+        apiKey: String,
+        file: File,
+        mime: String,
+        onStatus: (String) -> Unit
+    ): String = withContext(Dispatchers.IO) {
+        onStatus("Video yükleniyor (${humanSize(file.length())})…")
+        val start = Request.Builder()
+            .url("$UPLOAD_BASE/files?key=$apiKey")
+            .addHeader("X-Goog-Upload-Protocol", "resumable")
+            .addHeader("X-Goog-Upload-Command", "start")
+            .addHeader("X-Goog-Upload-Header-Content-Length", file.length().toString())
+            .addHeader("X-Goog-Upload-Header-Content-Type", mime)
+            .post(
+                JSONObject().put("file", JSONObject().put("display_name", file.name))
+                    .toString().toRequestBody(JSON_MT)
+            )
+            .build()
+        val uploadUrl = http.newCall(start).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) error(apiError(body, resp.code))
+            resp.header("X-Goog-Upload-URL") ?: error("Yükleme adresi alınamadı")
+        }
+
+        val upload = Request.Builder()
+            .url(uploadUrl)
+            .addHeader("X-Goog-Upload-Offset", "0")
+            .addHeader("X-Goog-Upload-Command", "upload, finalize")
+            .post(file.asRequestBody(mime.toMediaType()))
+            .build()
+        var info = http.newCall(upload).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) error(apiError(body, resp.code))
+            JSONObject(body).optJSONObject("file") ?: error("Yükleme yanıtı okunamadı")
+        }
+
+        var state = info.optString("state")
+        val name = info.optString("name")
+        var waited = 0
+        while (state == "PROCESSING" && waited < 300) {
+            onStatus("Video Gemini'de işleniyor… (${waited}s)")
+            delay(3000)
+            waited += 3
+            val poll = Request.Builder().url("$BASE/$name?key=$apiKey").get().build()
+            info = http.newCall(poll).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) error(apiError(body, resp.code))
+                JSONObject(body)
+            }
+            state = info.optString("state")
+        }
+        if (state == "FAILED") error("Video işlenemedi, farklı bir video dene.")
+        if (state != "ACTIVE") error("Video zamanında işlenemedi, daha kısa bir video dene.")
+        info.optString("uri").takeIf { it.isNotBlank() } ?: error("Video adresi alınamadı")
+    }
+
+    private fun humanSize(bytes: Long): String =
+        if (bytes >= 1024L * 1024) String.format("%.1f MB", bytes / 1024.0 / 1024.0)
+        else "${bytes / 1024} KB"
 
     private fun apiError(body: String, code: Int): String =
         runCatching { JSONObject(body).getJSONObject("error").getString("message") }
@@ -115,6 +217,109 @@ object GeminiClient {
     suspend fun extractFromText(apiKey: String, model: String, text: String): Result<ParsedProduct> =
         generate(apiKey, model, extractPrompt() + LocalDate.now() + "\nMetin: \"$text\"")
             .mapCatching { parseProductJson(it) }
+
+    // ---- Çoklu ürün çıkarımı (video / çoklu fotoğraf / çok ürünlü konuşma) ----
+
+    /** Birden fazla ürün bekleyen ortak yönerge. [source] kaynağı tarif eder. */
+    private fun multiPrompt(source: String): String {
+        val cats = CategoryStore.all.joinToString(", ") { it.id }
+        return buildString {
+            append("Bir mutfak envanteri asistanısın. $source\n")
+            append("İçerikte BİRDEN FAZLA gıda ürünü olabilir. HEPSİNİ eksiksiz listele, hiçbirini atlama.\n")
+            append("Aynı ürün birden fazla karede/fotoğrafta görünüyorsa TEK kayıt yaz, tekrar etme; ")
+            append("gerçekten birden çok adet varsa bunu \"quantity\" alanına yansıt.\n")
+            append("Her ürün için: adı (paketteki marka + ürün adı okunuyorsa onu yaz), miktar, birim, ")
+            append("son kullanma tarihi ve kategori.\n")
+            append("Son kullanma tarihi okunamıyorsa \"expiry\" alanını null bırak ve \"days\" alanına ")
+            append("o ürünün makul raf ömrünü GÜN olarak yaz (ör. taze ekmek 3, domates 7, konserve 365).\n")
+            append("Kategori tam olarak şunlardan biri olmalı: $cats\n")
+            append("Birim şunlardan biri olsun: adet, kg, g, L, ml, paket, kutu, şişe\n")
+            append("Gıda olmayan nesneleri (poşet, masa, telefon, insan vb.) listeleme.\n")
+            append("SADECE şu JSON'u döndür, başka hiçbir metin/açıklama yazma:\n")
+            append("""{"products":[{"name":"...","quantity":1,"unit":"adet","expiry":"yyyy-MM-dd","category":"...","days":7}]}""")
+            append("\nHiç ürün bulamazsan {\"products\":[]} döndür. Bugünün tarihi: ")
+            append(LocalDate.now())
+        }
+    }
+
+    /**
+     * Birden fazla fotoğrafı tek istekte analiz eder; her fotoğrafta birden çok ürün olabilir.
+     * Fotoğraf sayısı [MAX_IMAGES_PER_REQUEST]'i aşarsa çağıran taraf parçalara bölmelidir.
+     */
+    suspend fun extractManyFromImages(
+        apiKey: String,
+        model: String,
+        images: List<ByteArray>
+    ): Result<List<ParsedProduct>> {
+        if (images.isEmpty()) return Result.success(emptyList())
+        val parts = images.map { MediaPart("image/jpeg", base64 = Base64.encodeToString(it, Base64.NO_WRAP)) }
+        val source = if (images.size == 1) "Sana bir ürün fotoğrafı veriyorum."
+        else "Sana ${images.size} adet ürün fotoğrafı veriyorum (hepsi aynı alışverişten)."
+        return generateWithMedia(apiKey, model, multiPrompt(source), parts)
+            .mapCatching { parseProductsJson(it) }
+    }
+
+    /**
+     * Videoyu analiz eder. 14 MB altındaki videolar doğrudan, büyükler Files API ile yüklenerek
+     * gönderilir. [onStatus] yükleme/işleme durumunu ekrana yansıtmak içindir.
+     */
+    suspend fun extractManyFromVideo(
+        apiKey: String,
+        model: String,
+        file: File,
+        mime: String,
+        onStatus: (String) -> Unit = {}
+    ): Result<List<ParsedProduct>> = runCatching {
+        val part = if (file.length() <= INLINE_VIDEO_LIMIT) {
+            onStatus("Video hazırlanıyor (${humanSize(file.length())})…")
+            val b64 = withContext(Dispatchers.IO) { Base64.encodeToString(file.readBytes(), Base64.NO_WRAP) }
+            MediaPart(mime, base64 = b64)
+        } else {
+            MediaPart(mime, fileUri = uploadFile(apiKey, file, mime, onStatus))
+        }
+        onStatus("Gemini videodaki ürünleri çıkarıyor…")
+        val source = "Sana bir market alışverişi videosu veriyorum. " +
+            "Video boyunca kameranın önünden geçen tüm ürünleri sırayla incele."
+        generateWithMedia(apiKey, model, multiPrompt(source), listOf(part))
+            .mapCatching { parseProductsJson(it) }
+            .getOrThrow()
+    }
+
+    /** Tek cümlede sayılan birden fazla ürünü ayrıştırır. */
+    suspend fun extractManyFromText(
+        apiKey: String,
+        model: String,
+        text: String
+    ): Result<List<ParsedProduct>> {
+        val source = "Kullanıcı aldığı ürünleri sesli olarak söyledi, konuşmanın metni aşağıda. " +
+            "Konuşmada birden fazla ürün sayılmış olabilir; söylenen her ürünü ayrı kayıt yap. " +
+            "Kullanıcı bir ürün için tarih söylediyse onu kullan, söylemediyse \"days\" tahmini ver.\n" +
+            "Konuşma metni: \"$text\""
+        return generate(apiKey, model, multiPrompt(source))
+            .mapCatching { parseProductsJson(it) }
+    }
+
+    private fun parseProductsJson(raw: String): List<ParsedProduct> {
+        val cleaned = raw.trim()
+            .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val arr: JSONArray = when {
+            cleaned.indexOf('{').let { it >= 0 && (cleaned.indexOf('[') < 0 || it < cleaned.indexOf('[')) } -> {
+                val start = cleaned.indexOf('{')
+                val end = cleaned.lastIndexOf('}')
+                require(start >= 0 && end > start) { "JSON bulunamadı" }
+                JSONObject(cleaned.substring(start, end + 1)).optJSONArray("products") ?: JSONArray()
+            }
+            else -> {
+                val start = cleaned.indexOf('[')
+                val end = cleaned.lastIndexOf(']')
+                require(start >= 0 && end > start) { "JSON bulunamadı" }
+                JSONArray(cleaned.substring(start, end + 1))
+            }
+        }
+        return (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let { productFromJson(it) }
+        }.filter { !it.name.isNullOrBlank() }
+    }
 
     /**
      * Tüm envanteri TEK istekte inceletir. Gemini:
@@ -246,7 +451,10 @@ object GeminiClient {
         val start = cleaned.indexOf('{')
         val end = cleaned.lastIndexOf('}')
         require(start >= 0 && end > start) { "JSON bulunamadı" }
-        val o = JSONObject(cleaned.substring(start, end + 1))
+        return productFromJson(JSONObject(cleaned.substring(start, end + 1)))
+    }
+
+    private fun productFromJson(o: JSONObject): ParsedProduct {
         fun str(k: String): String? = if (o.isNull(k)) null else o.optString(k).takeIf { it.isNotBlank() && it != "null" }
         val name = str("name")
         // Gemini kategorisi eşleşmezse ada göre yerel tahmine düşülür.
@@ -261,7 +469,8 @@ object GeminiClient {
             quantity = if (o.isNull("quantity")) null else o.optDouble("quantity").takeIf { !it.isNaN() && it > 0 },
             unit = str("unit"),
             expiry = str("expiry")?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
-            category = category
+            category = category,
+            days = o.optInt("days", -1).takeIf { it > 0 }?.coerceIn(1, 3650)
         )
     }
 }

@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognitionListener
@@ -31,6 +29,8 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -66,22 +66,17 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavHostController
 import com.envanter.app.data.CategoryStore
+import com.envanter.app.data.DraftStore
 import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import com.envanter.app.data.ShelfLifeStore
 import com.envanter.app.data.UNITS
 import com.envanter.app.data.VoiceMode
-import com.envanter.app.gemini.GeminiClient
+import com.envanter.app.gemini.MediaAnalyzer
 import com.envanter.app.util.ParsedProduct
 import com.envanter.app.util.TextParse
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -91,18 +86,6 @@ private fun photoUri(context: Context): Pair<Uri, File> {
     val dir = File(context.cacheDir, "photos").apply { mkdirs() }
     val file = File(dir, "capture.jpg")
     return FileProvider.getUriForFile(context, "com.envanter.app.fileprovider", file) to file
-}
-
-private fun File.toJpegBytes(maxDim: Int = 1280): ByteArray {
-    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, opts)
-    var sample = 1
-    while (maxOf(opts.outWidth, opts.outHeight) / sample > maxDim) sample *= 2
-    val bmp = BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
-    val out = ByteArrayOutputStream()
-    bmp.compress(Bitmap.CompressFormat.JPEG, 85, out)
-    bmp.recycle()
-    return out.toByteArray()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -158,6 +141,11 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
             expiryAutoDays = 0
             userTouchedExpiry = true
         }
+        // Etiketinde tarih yoksa Gemini'nin raf ömrü tahminini kullan (tahmini işaretlenir).
+        if (p.expiry == null && (p.days ?: 0) > 0 && !userTouchedExpiry) {
+            expiry = LocalDate.now().plusDays(p.days!!.toLong()).toString()
+            expiryAutoDays = p.days
+        }
         // Kategori: önce ayrıştırıcının verdiği (DIGER değilse), yoksa isimden yerel tahmin.
         val resolved = p.category?.takeIf { it.id != CategoryStore.DEFAULT_ID }
             ?: p.name?.let { CategoryStore.guess(it) }?.takeIf { it.id != CategoryStore.DEFAULT_ID }
@@ -170,34 +158,37 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         else "Tarandı ✓ Kontrol edip kaydet."
     }
 
+    // Tek fotoğrafta/cümlede birden çok ürün çıkarsa hepsini toplu ekleme ekranına devret.
+    fun goBatch(products: List<ParsedProduct>, source: String) {
+        DraftStore.addParsed(products, source)
+        nav.popBackStack()
+        nav.navigate("batch")
+    }
+
     suspend fun analyzePhoto(file: File) {
         busy = true
         status = "Fotoğraf analiz ediliyor…"
-        val key = Settings.geminiKey(context).first()
-        val parsed: ParsedProduct? = if (key.isNotBlank()) {
-            val model = Settings.geminiModel(context).first()
-            GeminiClient.extractFromImage(key, model, file.toJpegBytes()).getOrNull()
-        } else null
-        val result = parsed ?: runCatching {
-            val image = InputImage.fromFilePath(context, Uri.fromFile(file))
-            val text = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-                .process(image).await().text
-            TextParse.parseOcr(text)
-        }.getOrElse { ParsedProduct() }
-        applyParsed(result)
+        val products = MediaAnalyzer.fromImageFile(context, file) { status = it }
+            .getOrElse { emptyList() }
         busy = false
+        when {
+            products.size > 1 -> goBatch(products, "fotoğraf")
+            products.size == 1 -> applyParsed(products.first())
+            else -> applyParsed(ParsedProduct())
+        }
     }
 
     suspend fun analyzeSpeech(text: String) {
         busy = true
         status = "\"$text\" işleniyor…"
-        val key = Settings.geminiKey(context).first()
-        val parsed = if (key.isNotBlank()) {
-            val model = Settings.geminiModel(context).first()
-            GeminiClient.extractFromText(key, model, text).getOrNull()
-        } else null
-        applyParsed(parsed ?: TextParse.parseSpeech(text))
+        val products = MediaAnalyzer.fromSpeech(context, text) { status = it }
+            .getOrElse { emptyList() }
         busy = false
+        when {
+            products.size > 1 -> goBatch(products, "ses")
+            products.size == 1 -> applyParsed(products.first())
+            else -> applyParsed(ParsedProduct())
+        }
     }
 
     val photoFile = remember { photoUri(context) }
@@ -355,6 +346,27 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 ) {
                     Icon(Icons.Filled.KeyboardVoice, null)
                     Text(if (voiceMode == VoiceMode.HOLD) " Basılı Tut, Konuş" else " Sesle Söyle")
+                }
+            }
+            // Çok ürünlü kaynaklar toplu ekleme ekranına yönlendirir.
+            if (!isEdit) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { nav.navigate("batch?mode=gallery") },
+                        modifier = Modifier.weight(1f),
+                        enabled = !busy
+                    ) {
+                        Icon(Icons.Filled.PhotoLibrary, null)
+                        Text(" Galeriden", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = { nav.navigate("batch?mode=video") },
+                        modifier = Modifier.weight(1f),
+                        enabled = !busy
+                    ) {
+                        Icon(Icons.Filled.Videocam, null)
+                        Text(" Videodan", maxLines = 1)
+                    }
                 }
             }
             if (busy) {

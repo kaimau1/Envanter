@@ -11,7 +11,12 @@ data class ParsedProduct(
     val quantity: Double? = null,
     val unit: String? = null,
     val expiry: LocalDate? = null,
-    val category: CategoryDef? = null
+    val category: CategoryDef? = null,
+    /**
+     * Ürünün üzerinde son kullanma tarihi görünmüyorsa Gemini'nin tahmin ettiği
+     * raf ömrü (gün). [expiry] doluysa kullanılmaz.
+     */
+    val days: Int? = null
 )
 
 /**
@@ -104,6 +109,29 @@ object TextParse {
             expiry = expiry,
             category = cleanName?.let { CategoryStore.guess(it) }
         )
+    }
+
+    /**
+     * Tek cümlede birden fazla ürün söylendiğinde (Gemini anahtarı yokken kullanılan
+     * cihaz-içi ayrıştırıcı) cümleyi bağlaçlardan bölüp her parçayı ayrı ürün sayar.
+     * Örn: "2 litre süt, 3 adet yumurta ve bir paket ekmek".
+     */
+    fun parseSpeechMany(text: String): List<ParsedProduct> {
+        val parts = splitProducts(text)
+        val parsed = parts.map { parseSpeech(it) }.filter { !it.name.isNullOrBlank() }
+        // Bölme işe yaramadıysa (tek parça / hiç ad çıkmadı) tekli sonuca düş.
+        if (parsed.size <= 1) return listOfNotNull(parseSpeech(text).takeIf { !it.name.isNullOrBlank() })
+        return parsed
+    }
+
+    /** "ve", "bir de", "ayrıca", virgül… gibi ayraçlardan böler; tarihleri bozmadan. */
+    fun splitProducts(text: String): List<String> {
+        // Önce tarih ifadelerini koru: "12 ağustos 2026" içindeki boşluklar ayraç değildir.
+        val separator = Regex(
+            """\s*(?:,|;|\bve\b|\bbir de\b|\bayrıca\b|\bayrica\b|\bartı\b|\barti\b|\bsonra da\b|\bbir tane de\b)\s*""",
+            RegexOption.IGNORE_CASE
+        )
+        return text.split(separator).map { it.trim() }.filter { it.isNotBlank() }
     }
 
     /** OCR metninden: tarih + en makul ürün adı satırı. */

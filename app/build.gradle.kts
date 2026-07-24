@@ -63,6 +63,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.3")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Fotoğraf yönünü (EXIF) düzeltmek için — yan yatmış etiketler Gemini'de okunmuyordu
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
