@@ -54,6 +54,11 @@ class MainActivity : ComponentActivity() {
             registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
                 .launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        // Ekranın desteklediği en yüksek yenileme hızını (120Hz+) iste; OEM'ler varsayılan 60Hz'e kısabiliyor.
+        @Suppress("DEPRECATION")
+        windowManager.defaultDisplay?.supportedModes?.maxByOrNull { it.refreshRate }?.let { mode ->
+            window.attributes = window.attributes.apply { preferredDisplayModeId = mode.modeId }
+        }
         startVoice = intent?.getBooleanExtra(EXTRA_VOICE, false) == true
         setContent {
             val context = LocalContext.current

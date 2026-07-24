@@ -12,7 +12,20 @@
           "package_name": "com.envanter.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "849818976833-eqo2nd8c6nhrocbbgavo8lpq7qddjt3p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.envanter.app",
+            "certificate_hash": "644f3ce07b565637af62df1a0f15dc9a1f113b85"
+          }
+        },
+        {
+          "client_id": "849818976833-gmu58gbrmlmd9l126pmh7j3b96bcg8ik.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDmWwat-1FPjijbpWAkZnOBkSSwBDDrg28"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "849818976833-gmu58gbrmlmd9l126pmh7j3b96bcg8ik.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
