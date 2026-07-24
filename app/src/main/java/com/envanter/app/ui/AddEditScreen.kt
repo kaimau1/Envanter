@@ -131,7 +131,13 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         p.quantity?.let { qtyText = fmtQty(it) }
         p.unit?.let { unit = it }
         p.expiry?.let { expiry = it.toString() }
-        p.category?.let { category = it.name; userTouchedCategory = true }
+        // Kategori: önce ayrıştırıcının verdiği (DIGER değilse), yoksa isimden yerel tahmin.
+        val resolved = p.category?.takeIf { it != Category.DIGER }
+            ?: p.name?.let { Category.guess(it) }?.takeIf { it != Category.DIGER }
+        if (resolved != null) {
+            category = resolved.name
+            userTouchedCategory = true
+        }
         status = if (p.name == null && p.expiry == null)
             "Bilgi çıkarılamadı, elle doldurabilirsin."
         else "Tarandı ✓ Kontrol edip kaydet."
@@ -182,6 +188,10 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Örn: 3 adet süt son kullanma 12 ağustos")
+            // Konuşma arasında erken kapanmayı önlemek için sessizlik toleransını uzat.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 8000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
         }
         runCatching { speechLauncher.launch(i) }
             .onFailure { status = "Ses tanıma bu cihazda kullanılamıyor." }
@@ -353,12 +363,19 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
             Button(
                 onClick = {
                     val qty = qtyText.replace(',', '.').toDoubleOrNull() ?: 1.0
+                    val finalName = name.trim().ifBlank { "İsimsiz ürün" }
+                    // Güvenlik ağı: kullanıcı kategoriyi elle seçmediyse ve mevcut kategori
+                    // DIGER ise, isimden son bir tahmin dene.
+                    val finalCategory =
+                        if (!userTouchedCategory && category == Category.DIGER.name)
+                            Category.guess(finalName).name
+                        else category
                     scope.launch {
                         val base = if (isEdit) Repository.get(itemId!!) else null
                         Repository.save(
                             (base ?: FoodItem()).copy(
-                                name = name.trim().ifBlank { "İsimsiz ürün" },
-                                category = category,
+                                name = finalName,
+                                category = finalCategory,
                                 quantity = qty,
                                 unit = unit,
                                 expiryDate = expiry,

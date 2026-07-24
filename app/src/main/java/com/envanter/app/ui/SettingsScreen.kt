@@ -22,6 +22,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.envanter.app.data.FirebaseSync
 import com.envanter.app.data.Settings
+import com.envanter.app.data.ThemeMode
 import com.envanter.app.gemini.GeminiClient
 import kotlinx.coroutines.launch
 
@@ -47,6 +51,7 @@ fun SettingsScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val themeMode by Settings.themeMode(context).collectAsState(initial = ThemeMode.SYSTEM)
     val savedKey by Settings.geminiKey(context).collectAsState(initial = "")
     val savedModel by Settings.geminiModel(context).collectAsState(initial = "gemini-2.0-flash")
     val notifEnabled by Settings.notifEnabled(context).collectAsState(initial = true)
@@ -83,6 +88,22 @@ fun SettingsScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("⚙️ Ayarlar", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Tema", fontWeight = FontWeight.Bold)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    ThemeMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = themeMode == mode,
+                            onClick = { scope.launch { Settings.setThemeMode(context, mode) } },
+                            shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                            label = { Text(mode.label) }
+                        )
+                    }
+                }
+            }
+        }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

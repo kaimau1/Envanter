@@ -68,16 +68,16 @@ fun DashboardScreen(nav: NavHostController) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StatCard(Modifier.weight(1f), expired.size, "Süresi geçti", UrgencyColors.red) {
-                    nav.navigate("inventory")
+                    nav.navigate("inventory?urgency=EXPIRED")
                 }
                 StatCard(Modifier.weight(1f), red.size, "Çok yakın", UrgencyColors.red) {
-                    nav.navigate("inventory")
+                    nav.navigate("inventory?urgency=RED")
                 }
                 StatCard(Modifier.weight(1f), yellow.size, "Yaklaşıyor", UrgencyColors.yellow) {
-                    nav.navigate("inventory")
+                    nav.navigate("inventory?urgency=YELLOW")
                 }
                 StatCard(Modifier.weight(1f), items.size, "Toplam", Color(0xFF2E7D32)) {
-                    nav.navigate("inventory")
+                    nav.navigate("inventory?urgency=")
                 }
             }
         }

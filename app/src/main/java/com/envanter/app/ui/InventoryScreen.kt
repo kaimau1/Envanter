@@ -19,6 +19,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -34,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.envanter.app.data.Category
 import com.envanter.app.data.Repository
+import com.envanter.app.data.Urgency
 import com.envanter.app.util.Fuzzy
 
 /**
@@ -42,15 +45,27 @@ import com.envanter.app.util.Fuzzy
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InventoryScreen(nav: NavHostController) {
+fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
     val all by Repository.observeItems().collectAsState(initial = emptyList())
     var query by remember { mutableStateOf("") }
     var selectedCat by remember { mutableStateOf<Category?>(null) }
+    // Dashboard'dan gelen aciliyet filtresi (temizlenebilir).
+    var urgencyFilter by remember(urgencyArg) {
+        mutableStateOf(runCatching { if (urgencyArg.isBlank()) null else Urgency.valueOf(urgencyArg) }.getOrNull())
+    }
 
     val filtered = all
         .filter { selectedCat == null || it.categoryEnum == selectedCat }
+        .filter { urgencyFilter == null || it.urgency == urgencyFilter }
         .filter { query.isBlank() || Fuzzy.matches(query, it.name) }
         .sortedWith(compareBy(nullsLast()) { it.daysLeft })
+
+    val urgencyLabel = when (urgencyFilter) {
+        Urgency.EXPIRED -> "Süresi geçenler"
+        Urgency.RED -> "Tarihi çok yakın olanlar"
+        Urgency.YELLOW -> "Tarihi yaklaşanlar"
+        else -> null
+    }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -69,6 +84,21 @@ fun InventoryScreen(nav: NavHostController) {
                 },
                 singleLine = true
             )
+            if (urgencyLabel != null) {
+                val accent = UrgencyColors.accent(urgencyFilter!!) ?: MaterialTheme.colorScheme.primary
+                InputChip(
+                    selected = true,
+                    onClick = { urgencyFilter = null },
+                    label = { Text("$urgencyLabel (${filtered.size})") },
+                    trailingIcon = { Icon(Icons.Filled.Clear, "filtreyi kaldır") },
+                    colors = InputChipDefaults.inputChipColors(
+                        selectedContainerColor = accent.copy(alpha = 0.16f),
+                        selectedLabelColor = accent,
+                        selectedTrailingIconColor = accent
+                    ),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                )
+            }
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)

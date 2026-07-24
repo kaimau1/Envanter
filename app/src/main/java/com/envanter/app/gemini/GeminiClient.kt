@@ -111,12 +111,21 @@ object GeminiClient {
         require(start >= 0 && end > start) { "JSON bulunamadı" }
         val o = JSONObject(cleaned.substring(start, end + 1))
         fun str(k: String): String? = if (o.isNull(k)) null else o.optString(k).takeIf { it.isNotBlank() && it != "null" }
+        val name = str("name")
+        // Gemini'nin döndürdüğü kategori enum/eş anlamlıya eşlenir; tutmazsa ada göre
+        // yerel tahmine düşülür. Böylece beklenmedik bir kategori metni DIGER'e sıkışmaz.
+        val geminiCat = Category.fromGemini(str("category"))
+        val category = when {
+            geminiCat != null && geminiCat != Category.DIGER -> geminiCat
+            name != null -> Category.guess(name).takeIf { it != Category.DIGER } ?: geminiCat
+            else -> geminiCat
+        }
         return ParsedProduct(
-            name = str("name"),
+            name = name,
             quantity = if (o.isNull("quantity")) null else o.optDouble("quantity").takeIf { !it.isNaN() && it > 0 },
             unit = str("unit"),
             expiry = str("expiry")?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
-            category = str("category")?.let { Category.fromName(it) }
+            category = category
         )
     }
 }

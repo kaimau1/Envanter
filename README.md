@@ -13,7 +13,11 @@ sade ve pratik bir Android uygulaması.
   çikolatada 1 ay kala sarı… her kategori kendi ömrüne göre değerlendirilir
 - **Akıllı arama:** yazım hatalarını tolere eden geniş arama (ör. "yogurt" → "Yoğurt")
 - **Sade dashboard:** özet sayaçlar + tarihi en yakın ürünler + hızlı ekleme kısayolları
-- **Ana ekran widget'ı:** tarihi yaklaşanları evde ekranından gör, tek dokunuşla ekle
+- **Ana ekran widget'ları:** (1) tarihi yaklaşanları gösteren + hızlı ekleme yapan widget,
+  (2) sadece sesle eklemek için boyutlandırılabilir (1x1 / 1x2) "🎤 Sesle Ekle" widget'ı
+- **Tema seçimi:** Açık / Koyu / Sistem (Ayarlar'dan)
+- **Dashboard kartları filtreler:** "Süresi geçti / Çok yakın / Yaklaşıyor" kartına dokununca
+  envanter otomatik o gruba filtrelenir
 - **Bildirimler:** tarihi kritikleşen ürünler için günde 2 kez otomatik uyarı
 - **Gemini asistan:** API anahtarını girince model listesi otomatik çekilir; "ne pişirsem",
   "önce ne tüketeyim" gibi analizler yapılır. Fotoğraf ve ses tanıma da anahtar girilince

@@ -22,9 +22,12 @@ private val DarkColors = darkColorScheme(
 )
 
 @Composable
-fun EnvanterTheme(content: @Composable () -> Unit) {
+fun EnvanterTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
+        colorScheme = if (darkTheme) DarkColors else LightColors,
         content = content
     )
 }

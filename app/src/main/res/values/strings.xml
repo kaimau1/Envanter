@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">Envanter</string>
     <string name="widget_label">Envanter – Yaklaşan Tarihler</string>
+    <string name="voice_widget_label">Envanter – Sesle Ekle</string>
 </resources>
