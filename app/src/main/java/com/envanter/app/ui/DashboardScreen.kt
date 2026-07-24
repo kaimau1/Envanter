@@ -108,6 +108,11 @@ fun DashboardScreen(nav: NavHostController) {
                 QuickAddButton(Modifier.weight(1f), Icons.Filled.KeyboardVoice, "Sesle") { nav.navigate("edit?mode=voice") }
             }
         }
+        if (items.isNotEmpty()) {
+            item {
+                GeminiFixButton(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
+            }
+        }
         item {
             Row(
                 modifier = Modifier

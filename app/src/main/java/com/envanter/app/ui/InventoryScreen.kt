@@ -14,10 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,24 +33,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.envanter.app.data.Category
 import com.envanter.app.data.Repository
-import com.envanter.app.data.Settings
 import com.envanter.app.data.SortOption
 import com.envanter.app.data.Urgency
-import com.envanter.app.gemini.GeminiClient
 import com.envanter.app.util.Fuzzy
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 /**
  * Envanter listesi: geniş (yazım hatası toleranslı) arama, dropdown içinde
@@ -62,8 +54,6 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val all by Repository.observeItems().collectAsState(initial = emptyList())
 
     var query by remember { mutableStateOf("") }
@@ -72,9 +62,6 @@ fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
     var urgencyFilter by remember(urgencyArg) {
         mutableStateOf(runCatching { if (urgencyArg.isBlank()) null else Urgency.valueOf(urgencyArg) }.getOrNull())
     }
-    var fixBusy by remember { mutableStateOf(false) }
-    var fixStatus by remember { mutableStateOf("") }
-
     val filtered = sort.sort(
         all
             .filter { selectedCat == null || it.categoryEnum == selectedCat }
@@ -87,35 +74,6 @@ fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
         Urgency.RED -> "Tarihi çok yakın olanlar"
         Urgency.YELLOW -> "Tarihi yaklaşanlar"
         else -> null
-    }
-
-    fun runGeminiFix() {
-        scope.launch {
-            val key = Settings.geminiKey(context).first()
-            if (key.isBlank()) {
-                fixStatus = "Önce Ayarlar'dan Gemini API anahtarını ekle."
-                return@launch
-            }
-            fixBusy = true
-            fixStatus = "Gemini tüm envanteri inceliyor…"
-            val model = Settings.geminiModel(context).first()
-            val current = Repository.items()
-            GeminiClient.fixCategories(key, model, current.map { it.id to it.name })
-                .onSuccess { map ->
-                    var changed = 0
-                    current.forEach { item ->
-                        val newCat = map[item.id]
-                        if (newCat != null && newCat.name != item.category) {
-                            Repository.save(item.copy(category = newCat.name))
-                            changed++
-                        }
-                    }
-                    fixStatus = if (changed == 0) "Her şey doğru görünüyor, değişiklik gerekmedi ✓"
-                    else "$changed ürünün kategorisi düzeltildi ✓ (renk uyarıları da güncellendi)"
-                }
-                .onFailure { fixStatus = "Hata: ${it.message}" }
-            fixBusy = false
-        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -147,30 +105,11 @@ fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
                 Box(Modifier.weight(1f)) { SortDropdown(sort) { sort = it } }
             }
 
-            // Gemini ile toplu kategori düzeltme
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(onClick = { runGeminiFix() }, enabled = !fixBusy && all.isNotEmpty()) {
-                    if (fixBusy) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Filled.AutoFixHigh, null, modifier = Modifier.size(18.dp))
-                    }
-                    Text(" Gemini ile kategorileri düzelt", fontSize = 13.sp, maxLines = 1)
-                }
-            }
-            if (fixStatus.isNotBlank()) {
-                Text(
-                    fixStatus,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-                )
-            }
+            // Gemini ile toplu kategori düzeltme (ana sayfadaki ile aynı bileşen)
+            GeminiFixButton(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                enabled = all.isNotEmpty()
+            )
 
             if (urgencyLabel != null) {
                 val accent = UrgencyColors.accent(urgencyFilter!!) ?: MaterialTheme.colorScheme.primary

@@ -123,7 +123,7 @@ fun AssistantScreen() {
         }
         if (answer.isNotBlank()) {
             Card(modifier = Modifier.fillMaxWidth()) {
-                Text(answer, modifier = Modifier.padding(14.dp))
+                MarkdownText(answer, modifier = Modifier.padding(14.dp))
             }
         }
     }

@@ -11,25 +11,83 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Urgency
+import com.envanter.app.gemini.CategoryFixer
 import com.envanter.app.util.TextParse
+import kotlinx.coroutines.launch
+
+/**
+ * "Gemini ile kategorileri düzelt" butonu (ana sayfa ve envanterde ortak).
+ * Tüm envanteri tek istekte inceler; yanlış kategorileri toplu düzeltir.
+ * Kategori eşiklerine bağlı olduğu için renk uyarıları da otomatik güncellenir.
+ */
+@Composable
+fun GeminiFixButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+
+    Column(modifier) {
+        OutlinedButton(
+            onClick = {
+                scope.launch {
+                    busy = true
+                    status = "Gemini tüm envanteri inceliyor…"
+                    CategoryFixer.run(context)
+                        .onSuccess { n ->
+                            status = if (n == 0) "Her şey doğru görünüyor, değişiklik gerekmedi ✓"
+                            else "$n ürünün kategorisi düzeltildi ✓ (renk uyarıları da güncellendi)"
+                        }
+                        .onFailure { status = it.message ?: "Bir hata oluştu." }
+                    busy = false
+                }
+            },
+            enabled = enabled && !busy
+        ) {
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Filled.AutoFixHigh, null, modifier = Modifier.size(18.dp))
+            }
+            Text(" Gemini ile kategorileri düzelt", fontSize = 13.sp, maxLines = 1)
+        }
+        if (status.isNotBlank()) {
+            Text(
+                status,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
 
 /** Miktarı kısa yazar: 1.0 -> "1", 0.5 -> "0.5" */
 fun fmtQty(q: Double): String =
