@@ -13,7 +13,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -106,6 +109,19 @@ fun DashboardScreen(nav: NavHostController) {
                 QuickAddButton(Modifier.weight(1f), Icons.Filled.Edit, "Elle Ekle") { nav.navigate("edit") }
                 QuickAddButton(Modifier.weight(1f), Icons.Filled.PhotoCamera, "Fotoğraf") { nav.navigate("edit?mode=photo") }
                 QuickAddButton(Modifier.weight(1f), Icons.Filled.KeyboardVoice, "Sesle") { nav.navigate("edit?mode=voice") }
+            }
+        }
+        // Tek videoda / birden çok fotoğrafta / tek cümlede geçen TÜM ürünleri toplu ekleme.
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickAddButton(Modifier.weight(1f), Icons.Filled.Videocam, "Videodan") { nav.navigate("batch?mode=video") }
+                QuickAddButton(Modifier.weight(1f), Icons.Filled.PhotoLibrary, "Galeriden") { nav.navigate("batch?mode=gallery") }
+                QuickAddButton(Modifier.weight(1f), Icons.Filled.PlaylistAdd, "Toplu Ekle") { nav.navigate("batch") }
             }
         }
         if (items.isNotEmpty()) {

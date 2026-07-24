@@ -39,6 +39,7 @@ import com.envanter.app.data.Settings
 import com.envanter.app.data.ThemeMode
 import com.envanter.app.ui.AddEditScreen
 import com.envanter.app.ui.AssistantScreen
+import com.envanter.app.ui.BatchAddScreen
 import com.envanter.app.ui.DashboardScreen
 import com.envanter.app.ui.EnvanterTheme
 import com.envanter.app.ui.InventoryScreen
@@ -110,7 +111,7 @@ fun AppNav(startVoice: Boolean = false, onVoiceConsumed: () -> Unit = {}) {
 
     Scaffold(
         bottomBar = {
-            if (currentBase != "edit") {
+            if (currentBase != "edit" && currentBase != "batch") {
                 NavigationBar {
                     tabs.forEach { tab ->
                         NavigationBarItem(
@@ -151,6 +152,12 @@ fun AppNav(startVoice: Boolean = false, onVoiceConsumed: () -> Unit = {}) {
                 arguments = listOf(navArgument("mode") { defaultValue = "" })
             ) { entry ->
                 AddEditScreen(nav, null, entry.arguments?.getString("mode") ?: "")
+            }
+            composable(
+                "batch?mode={mode}",
+                arguments = listOf(navArgument("mode") { defaultValue = "" })
+            ) { entry ->
+                BatchAddScreen(nav, entry.arguments?.getString("mode") ?: "")
             }
             composable("edit/{id}") { entry ->
                 AddEditScreen(nav, entry.arguments?.getString("id"), "")
