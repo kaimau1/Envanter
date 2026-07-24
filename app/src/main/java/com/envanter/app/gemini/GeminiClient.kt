@@ -103,6 +103,43 @@ object GeminiClient {
         generate(apiKey, model, EXTRACT_PROMPT + LocalDate.now() + "\nMetin: \"$text\"")
             .mapCatching { parseProductJson(it) }
 
+    private val VALID_CATS = Category.entries.filter { it != Category.DIGER }
+        .joinToString(", ") { it.name }
+
+    /**
+     * Tüm envanteri Gemini'ye gönderip her ürün için en doğru kategoriyi ister.
+     * items: (id, ad) çiftleri. Dönen: id -> Category (yalnız güvenli eşleşmeler).
+     */
+    suspend fun fixCategories(
+        apiKey: String,
+        model: String,
+        items: List<Pair<String, String>>
+    ): Result<Map<String, Category>> {
+        if (items.isEmpty()) return Result.success(emptyMap())
+        val list = items.joinToString("\n") { "${it.first} | ${it.second}" }
+        val prompt = "Aşağıda bir mutfak envanterindeki ürünler var (id | ad). " +
+            "Her ürün için en uygun gıda kategorisini seç. " +
+            "SADECE şu JSON dizisini döndür, başka metin yazma: " +
+            """[{"id":"...","category":"KATEGORI"}] """ +
+            "KATEGORI şunlardan biri olmalı: $VALID_CATS, DIGER.\n\nÜrünler:\n$list"
+        return generate(apiKey, model, prompt).mapCatching { raw ->
+            val cleaned = raw.trim()
+                .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            val start = cleaned.indexOf('[')
+            val end = cleaned.lastIndexOf(']')
+            require(start >= 0 && end > start) { "JSON dizisi bulunamadı" }
+            val arr = JSONArray(cleaned.substring(start, end + 1))
+            val map = mutableMapOf<String, Category>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val id = o.optString("id").takeIf { it.isNotBlank() } ?: continue
+                val cat = Category.fromGemini(o.optString("category")) ?: continue
+                map[id] = cat
+            }
+            map
+        }
+    }
+
     private fun parseProductJson(raw: String): ParsedProduct {
         val cleaned = raw.trim()
             .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
