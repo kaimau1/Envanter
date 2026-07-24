@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- basket -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,48 L76,48 L71,74 A4,4 0 0 1 67,77 L41,77 A4,4 0 0 1 37,74 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M42,48 L50,32 M66,48 L58,32" />
+    <!-- clock badge -->
+    <path
+        android:fillColor="#FFC107"
+        android:pathData="M70,34 m-12,0 a12,12 0 1 0 24,0 a12,12 0 1 0 -24,0" />
+    <path
+        android:strokeColor="#5D4037"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M70,27 L70,34 L75,38" />
+</vector>

@@ -1,0 +1,93 @@
+name: APK Derle ve Yayınla
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: "Sürüm notu (isteğe bağlı)"
+        required: false
+        default: "Yeni derleme"
+  push:
+    branches: [main, master, "claude/**"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+      MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: JDK 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Gradle önbelleği
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Sürüm numarası hesapla
+        id: ver
+        run: |
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "name=1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: APK derle (imzalı release)
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon \
+            -PversionCode=${{ steps.ver.outputs.code }} \
+            -PversionName=${{ steps.ver.outputs.name }}
+
+      - name: APK'yı yeniden adlandır
+        run: cp app/build/outputs/apk/release/app-release.apk Envanter-v${{ steps.ver.outputs.name }}.apk
+
+      - name: Artifact olarak yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Envanter-v${{ steps.ver.outputs.name }}
+          path: Envanter-v${{ steps.ver.outputs.name }}.apk
+
+      - name: GitHub Release oluştur
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.name }}
+          name: Envanter v${{ steps.ver.outputs.name }}
+          body: |
+            📦 Envanter APK — otomatik derleme
+
+            ${{ github.event.inputs.release_notes || github.event.head_commit.message || 'Yeni derleme' }}
+
+            Kurulum: APK'yı indirip telefonda aç. İmza sabit olduğu için
+            önceki sürümün üzerine doğrudan güncellenir, veriler korunur.
+          files: Envanter-v${{ steps.ver.outputs.name }}.apk
+
+      - name: E-posta gönder
+        if: ${{ env.MAIL_USERNAME != '' && env.MAIL_PASSWORD != '' }}
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ env.MAIL_USERNAME }}
+          password: ${{ env.MAIL_PASSWORD }}
+          subject: "📦 Envanter v${{ steps.ver.outputs.name }} APK hazır"
+          to: hekimasistanitr@gmail.com
+          from: Envanter CI
+          body: |
+            Yeni Envanter APK'sı derlendi ve yayınlandı.
+
+            Sürüm: v${{ steps.ver.outputs.name }}
+            İndirme: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.ver.outputs.name }}
+
+            İyi kullanımlar!
