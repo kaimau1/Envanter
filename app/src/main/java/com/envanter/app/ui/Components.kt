@@ -105,11 +105,13 @@ fun fmtQty(q: Double): String =
 fun expiryLabel(item: FoodItem): String {
     val d = item.daysLeft ?: return "tarih yok"
     val date = item.expiry?.let { TextParse.formatDate(it) } ?: ""
+    // Tarihi sistem tahmin ettiyse belli olsun; kullanıcının verdiği tarih işaretlenmez.
+    val auto = if (item.expiryAutoDays > 0) " • ~tahmini" else ""
     return when {
-        d < 0 -> "$date • ${-d} gün geçti!"
-        d == 0L -> "$date • BUGÜN son gün"
-        d == 1L -> "$date • yarın son gün"
-        else -> "$date • $d gün kaldı"
+        d < 0 -> "$date • ${-d} gün geçti!$auto"
+        d == 0L -> "$date • BUGÜN son gün$auto"
+        d == 1L -> "$date • yarın son gün$auto"
+        else -> "$date • $d gün kaldı$auto"
     }
 }
 

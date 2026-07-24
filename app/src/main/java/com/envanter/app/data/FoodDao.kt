@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.RoomWarnings
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import android.content.Context
@@ -31,6 +32,21 @@ interface FoodDao {
 
     @Query("SELECT * FROM items")
     suspend fun getAllIncludingDeleted(): List<FoodItem>
+
+    /**
+     * Daha önce eklenmiş ürün adı önerileri. Silinen ürünler de sayılır: bitirip
+     * tekrar aldığın ürünün adı (özellikle fotoğraftan gelen markalı tam ad)
+     * hafızada kalsın diye. Sık eklenen üstte, eşitlikte en son eklenen üstte.
+     */
+    // MAX(updatedAt) kolonu FoodItem'a maplenmez; sadece grup içi satır seçimi için var.
+    @SuppressWarnings(RoomWarnings.CURSOR_MISMATCH)
+    @Query(
+        // MAX(updatedAt) SELECT içinde: SQLite'ta gruptaki diğer kolonlar da o satırdan
+        // gelir, yani kategori/birim en son eklenen kayıttan okunur (rastgele değil).
+        "SELECT *, MAX(updatedAt) FROM items WHERE name LIKE :q ESCAPE '!' " +
+            "GROUP BY LOWER(name) ORDER BY COUNT(*) DESC, MAX(updatedAt) DESC LIMIT :limit"
+    )
+    suspend fun suggestByName(q: String, limit: Int = 6): List<FoodItem>
 }
 
 @Dao

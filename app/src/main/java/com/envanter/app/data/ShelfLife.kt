@@ -33,7 +33,10 @@ object ShelfLifeStore {
         ShelfLife("karpuz", 7), ShelfLife("kavun", 7), ShelfLife("kayısı", 5),
         ShelfLife("şeftali", 5), ShelfLife("erik", 5), ShelfLife("kiraz", 5),
         ShelfLife("vişne", 5), ShelfLife("nar", 21), ShelfLife("incir", 3),
-        ShelfLife("avokado", 5), ShelfLife("kivi", 14), ShelfLife("ananas", 5)
+        ShelfLife("avokado", 5), ShelfLife("kivi", 14), ShelfLife("ananas", 5),
+        // Etiketinde tarih olsa bile açıldıktan sonra hızlı biten temel ürünler.
+        ShelfLife("peynir", 10), ShelfLife("kaşar", 14), ShelfLife("ekmek", 3),
+        ShelfLife("yumurta", 21), ShelfLife("zeytin", 21)
     )
 
     // Varsayılanlarla başlar: Room'dan yükleme asenkron olduğu için boş başlarsa

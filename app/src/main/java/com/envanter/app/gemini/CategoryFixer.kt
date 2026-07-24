@@ -38,7 +38,8 @@ object CategoryFixer {
         val currentCats = Repository.categories().ifEmpty { CategoryStore.all }
 
         return GeminiClient.reviewInventory(
-            key, model, currentCats, items.map { it.id to it.name }, ShelfLifeStore.all
+            key, model, currentCats, items.map { it.id to it.name }, ShelfLifeStore.all,
+            datelessNames = items.filter { it.expiryDate.isBlank() }.map { it.name }
         ).map { review ->
                 // 1) Kategori ekleme/düzenleme
                 val existingById = currentCats.associateBy { it.id }
@@ -73,7 +74,8 @@ object CategoryFixer {
                     // Yalnız BOŞ ya da daha önce otomatik atanmış tarihlere dokunulur;
                     // kullanıcının elle/sesle/fotoğrafla verdiği tarih korunur.
                     if (!item.expiryFromUser) {
-                        val days = ShelfLifeStore.guess(item.name)
+                        // Önce Gemini'nin bu ürün için verdiği gün; yoksa yerel tahmin listesi.
+                        val days = review.itemDays[item.id] ?: ShelfLifeStore.guess(item.name)
                         if (days != null) {
                             val newDate = if (item.expiryDate.isBlank()) {
                                 LocalDate.now().plusDays(days.toLong()).toString()

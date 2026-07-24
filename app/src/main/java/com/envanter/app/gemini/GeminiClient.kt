@@ -20,7 +20,9 @@ import java.util.concurrent.TimeUnit
 data class InventoryReview(
     val categories: List<CategoryDef>,
     val itemCategories: Map<String, String>,
-    val shelfLife: List<ShelfLife> = emptyList()
+    val shelfLife: List<ShelfLife> = emptyList(),
+    /** Ürün id -> tahmini raf ömrü (gün). Tarihi boş ürünler için Gemini'nin doğrudan cevabı. */
+    val itemDays: Map<String, Int> = emptyMap()
 )
 
 /**
@@ -126,7 +128,8 @@ object GeminiClient {
         model: String,
         currentCategories: List<CategoryDef>,
         items: List<Pair<String, String>>,
-        currentShelfLife: List<ShelfLife> = emptyList()
+        currentShelfLife: List<ShelfLife> = emptyList(),
+        datelessNames: List<String> = emptyList()
     ): Result<InventoryReview> {
         if (items.isEmpty()) return Result.success(InventoryReview(emptyList(), emptyMap()))
         val catLines = currentCategories.joinToString("\n") {
@@ -138,8 +141,11 @@ object GeminiClient {
             append("Bir mutfak envanteri asistanısın. Aşağıda mevcut kategoriler ve ürünler var.\n\n")
             append("MEVCUT KATEGORİLER (id | ad | kırmızı eşiği | sarı eşiği):\n$catLines\n\n")
             append("ÜRÜNLER (id | ad):\n$itemLines\n\n")
-            append("MEVCUT ÜRÜN BAZLI RAF ÖMÜRLERİ (anahtar kelime | gün, üstünde tarih olmayan taze/paketsiz ürünler için):\n")
+            append("MEVCUT ÜRÜN BAZLI RAF ÖMÜRLERİ (anahtar kelime | gün):\n")
             append(if (shelfLines.isBlank()) "(henüz yok)" else shelfLines)
+            append("\n\n")
+            append("TARİHİ BOŞ ÜRÜNLER (envanterde son kullanma tarihi girilmemiş olanlar):\n")
+            append(if (datelessNames.isEmpty()) "(yok)" else datelessNames.joinToString("\n"))
             append("\n\n")
             append("Görevin:\n")
             append("1) Her ürünü en doğru kategoriye ata.\n")
@@ -147,12 +153,18 @@ object GeminiClient {
             append("yeni kategoriye o gıda türüne uygun kırmızı ve sarı gün eşiği ver ")
             append("(ör. çabuk bozulan taze ürünler kısa, konserve/kuru gıda uzun).\n")
             append("3) Mevcut bir kategorinin gün eşiği ürün türüne göre yanlışsa düzeltebilirsin.\n")
-            append("4) Envanterdeki ürün isimlerinden, üstünde son kullanma tarihi genelde OLMAYAN taze/paketsiz ")
-            append("ürünler (taze meyve, sebze, ekmek vb.) için uygun bir raf ömrü (gün) öner; ")
-            append("mevcut bir eşleşme yanlışsa düzelt.\n\n")
+            append("4) TARİHİ BOŞ ÜRÜNLER listesindeki HER ürün için items kaydına \"days\" ekle — ")
+            append("hiçbirini atlama. Ürün adından makul bir raf ömrü (gün) tahmin et; ")
+            append("paketinde tarih yazan ürünlerde bile açıldıktan sonrasına göre tahmin ver ")
+            append("(ör. açılmış peynir ~10 gün, açılmış salça ~20 gün). ")
+            append("Tarihi zaten olan ürünlere \"days\" YAZMA.\n")
+            append("5) Aynı tahminleri ileride tekrar kullanabilmek için shelfLife'a da ekle; ")
+            append("keyword olarak ürünün markasız, sade adını kullan ")
+            append("(ör. \"Sütaş beyaz peynir 500g\" -> \"beyaz peynir\"). ")
+            append("Mevcut bir raf ömrü yanlışsa düzelt.\n\n")
             append("SADECE şu JSON'u döndür, başka metin yazma:\n")
             append("""{"categories":[{"id":"KISA_BUYUK_HARF_ID","label":"Ad","emoji":"🍎","redDays":3,"yellowDays":7,"keywords":["kelime1","kelime2"]}],""")
-            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID"}],""")
+            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID","days":10}],""")
             append(""""shelfLife":[{"keyword":"domates","days":7}]}""")
             append("\nNot: categories ve shelfLife listelerine sadece YENİ veya DEĞİŞTİRDİĞİN kayıtları koy. ")
             append("id'ler büyük harf ve alt çizgili olsun (ör. BEBEK_MAMASI). Bugünün tarihi: ")
@@ -201,10 +213,12 @@ object GeminiClient {
             }
 
             val map = mutableMapOf<String, String>()
+            val days = mutableMapOf<String, Int>()
             root.optJSONArray("items")?.let { arr ->
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
                     val id = o.optString("id").takeIf { it.isNotBlank() } ?: continue
+                    o.optInt("days", -1).takeIf { it > 0 }?.let { days[id] = it.coerceIn(1, 3650) }
                     val catRaw = o.optString("category").takeIf { it.isNotBlank() } ?: continue
                     val catId = catRaw.uppercase().replace(Regex("[^A-Z0-9]+"), "_").trim('_')
                     map[id] = catId
@@ -222,7 +236,7 @@ object GeminiClient {
                     shelfLife += ShelfLife(keyword, days.coerceIn(1, 3650))
                 }
             }
-            InventoryReview(cats, map, shelfLife)
+            InventoryReview(cats, map, shelfLife, days)
         }
     }
 

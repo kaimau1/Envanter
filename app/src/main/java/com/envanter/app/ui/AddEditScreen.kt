@@ -61,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavHostController
@@ -127,6 +128,8 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
     var userTouchedExpiry by rememberSaveable { mutableStateOf(false) }
     // 0 = tarihi kullanıcı verdi (elle/sesle/fotoğrafla), >0 = otomatik tahmin (kaç günlük)
     var expiryAutoDays by rememberSaveable { mutableStateOf(0) }
+    var suggestions by remember { mutableStateOf<List<FoodItem>>(emptyList()) }
+    var suggestionsDismissed by remember { mutableStateOf(false) }
 
     val isEdit = itemId != null
 
@@ -288,6 +291,12 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         }
     }
 
+    // Ad yazıldıkça daha önce eklenen ürünlerden öneri getir (düzenlemede gerekmez).
+    LaunchedEffect(name) {
+        suggestions = if (isEdit) emptyList()
+        else Repository.suggestNames(name).filter { !it.name.equals(name, ignoreCase = true) }
+    }
+
     // Ad değiştikçe kategori tahmini (kullanıcı elle seçmediyse)
     LaunchedEffect(name) {
         if (!userTouchedCategory && name.length >= 3) {
@@ -357,13 +366,34 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 Text(status, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
             }
 
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Ürün adı") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            Box {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; suggestionsDismissed = false },
+                    label = { Text("Ürün adı") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                // Daha önce eklenen ürünler (fotoğraftan gelen markalı adlar dahil).
+                DropdownMenu(
+                    expanded = suggestions.isNotEmpty() && !suggestionsDismissed,
+                    onDismissRequest = { suggestionsDismissed = true },
+                    properties = PopupProperties(focusable = false)
+                ) {
+                    suggestions.forEach { s ->
+                        DropdownMenuItem(
+                            text = { Text("${CategoryStore.byId(s.category).emoji} ${s.name}") },
+                            onClick = {
+                                name = s.name
+                                category = s.category
+                                unit = s.unit
+                                userTouchedCategory = true
+                                suggestionsDismissed = true
+                            }
+                        )
+                    }
+                }
+            }
 
             Box {
                 OutlinedTextField(
@@ -437,6 +467,9 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 readOnly = true,
                 label = { Text("Son kullanma tarihi") },
                 placeholder = { Text("Seçmek için dokun") },
+                supportingText = if (expiryAutoDays > 0) {
+                    { Text("~$expiryAutoDays günlük tahmin — elle seçersen sabitlenir") }
+                } else null,
                 modifier = Modifier.fillMaxWidth(),
                 trailingIcon = {
                     Row {

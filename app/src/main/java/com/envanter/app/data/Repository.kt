@@ -36,7 +36,12 @@ object Repository {
             }
         }
         scope.launch {
-            if (shelfLifeDao.count() == 0) shelfLifeDao.upsertAll(ShelfLifeStore.DEFAULTS)
+            // Yalnız eksik varsayılanları ekler: hem ilk kurulumu tohumlar, hem de
+            // sonradan eklenen varsayılanlar mevcut kurulumlara gelir. Gemini'nin
+            // düzelttiği kayıtların üzerine yazmaz.
+            val existing = shelfLifeDao.getAll().map { it.keyword }.toSet()
+            val missing = ShelfLifeStore.DEFAULTS.filter { it.keyword !in existing }
+            if (missing.isNotEmpty()) shelfLifeDao.upsertAll(missing)
             ShelfLifeStore.update(shelfLifeDao.getAll())
         }
         scope.launch {
@@ -104,6 +109,15 @@ object Repository {
     }
 
     suspend fun allIncludingDeleted(): List<FoodItem> = dao.getAllIncludingDeleted()
+
+    /** Ad yazılırken çıkan öneriler; daha önce eklediğin (sildiklerin dahil) ürünler. */
+    suspend fun suggestNames(prefix: String): List<FoodItem> {
+        val q = prefix.trim()
+        if (q.length < 2) return emptyList()
+        // LIKE joker karakterleri kaçırılmazsa "%" yazan kullanıcı tüm listeyi çeker.
+        val safe = q.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        return dao.suggestByName("%$safe%")
+    }
 
     fun refreshWidgets() {
         runCatching {
