@@ -68,6 +68,7 @@ import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
+import com.envanter.app.data.ShelfLifeStore
 import com.envanter.app.data.UNITS
 import com.envanter.app.data.VoiceMode
 import com.envanter.app.gemini.GeminiClient
@@ -123,6 +124,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
     var catExpanded by remember { mutableStateOf(false) }
     var unitExpanded by remember { mutableStateOf(false) }
     var userTouchedCategory by rememberSaveable { mutableStateOf(false) }
+    var userTouchedExpiry by rememberSaveable { mutableStateOf(false) }
 
     val isEdit = itemId != null
 
@@ -133,6 +135,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 qtyText = fmtQty(it.quantity); unit = it.unit
                 expiry = it.expiryDate; note = it.note
                 userTouchedCategory = true
+                userTouchedExpiry = true
             }
             loaded = true
         }
@@ -283,6 +286,15 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         }
     }
 
+    // Etiketinde tarih olmayan ürünler (taze meyve/sebze vb.) için tahmini raf ömrü öner.
+    LaunchedEffect(name) {
+        if (!userTouchedExpiry && expiry.isBlank() && name.length >= 3) {
+            ShelfLifeStore.guess(name)?.let { days ->
+                expiry = LocalDate.now().plusDays(days.toLong()).toString()
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -419,7 +431,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 trailingIcon = {
                     Row {
                         if (expiry.isNotBlank()) {
-                            TextButton(onClick = { expiry = "" }) { Text("Temizle") }
+                            TextButton(onClick = { expiry = ""; userTouchedExpiry = true }) { Text("Temizle") }
                         }
                         TextButton(onClick = { showDatePicker = true }) { Text("Seç") }
                     }
@@ -479,6 +491,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 TextButton(onClick = {
                     pickerState.selectedDateMillis?.let { ms ->
                         expiry = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString()
+                        userTouchedExpiry = true
                     }
                     showDatePicker = false
                 }) { Text("Tamam") }

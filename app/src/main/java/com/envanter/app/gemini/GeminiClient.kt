@@ -3,6 +3,7 @@ package com.envanter.app.gemini
 import android.util.Base64
 import com.envanter.app.data.CategoryDef
 import com.envanter.app.data.CategoryStore
+import com.envanter.app.data.ShelfLife
 import com.envanter.app.util.ParsedProduct
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,7 +19,8 @@ import java.util.concurrent.TimeUnit
 /** Gemini'nin envanter incelemesi sonucu: güncel/yeni kategoriler + ürün atamaları. */
 data class InventoryReview(
     val categories: List<CategoryDef>,
-    val itemCategories: Map<String, String>
+    val itemCategories: Map<String, String>,
+    val shelfLife: List<ShelfLife> = emptyList()
 )
 
 /**
@@ -123,27 +125,36 @@ object GeminiClient {
         apiKey: String,
         model: String,
         currentCategories: List<CategoryDef>,
-        items: List<Pair<String, String>>
+        items: List<Pair<String, String>>,
+        currentShelfLife: List<ShelfLife> = emptyList()
     ): Result<InventoryReview> {
         if (items.isEmpty()) return Result.success(InventoryReview(emptyList(), emptyMap()))
         val catLines = currentCategories.joinToString("\n") {
             "${it.id} | ${it.label} | kırmızı<=${it.redDays}gün | sarı<=${it.yellowDays}gün"
         }
         val itemLines = items.joinToString("\n") { "${it.first} | ${it.second}" }
+        val shelfLines = currentShelfLife.joinToString("\n") { "${it.keyword} | ${it.days} gün" }
         val prompt = buildString {
             append("Bir mutfak envanteri asistanısın. Aşağıda mevcut kategoriler ve ürünler var.\n\n")
             append("MEVCUT KATEGORİLER (id | ad | kırmızı eşiği | sarı eşiği):\n$catLines\n\n")
             append("ÜRÜNLER (id | ad):\n$itemLines\n\n")
+            append("MEVCUT ÜRÜN BAZLI RAF ÖMÜRLERİ (anahtar kelime | gün, üstünde tarih olmayan taze/paketsiz ürünler için):\n")
+            append(if (shelfLines.isBlank()) "(henüz yok)" else shelfLines)
+            append("\n\n")
             append("Görevin:\n")
             append("1) Her ürünü en doğru kategoriye ata.\n")
             append("2) Ürünler mevcut kategorilere iyi oturmuyorsa YENİ kategori ekleyebilirsin; ")
             append("yeni kategoriye o gıda türüne uygun kırmızı ve sarı gün eşiği ver ")
             append("(ör. çabuk bozulan taze ürünler kısa, konserve/kuru gıda uzun).\n")
-            append("3) Mevcut bir kategorinin gün eşiği ürün türüne göre yanlışsa düzeltebilirsin.\n\n")
+            append("3) Mevcut bir kategorinin gün eşiği ürün türüne göre yanlışsa düzeltebilirsin.\n")
+            append("4) Envanterdeki ürün isimlerinden, üstünde son kullanma tarihi genelde OLMAYAN taze/paketsiz ")
+            append("ürünler (taze meyve, sebze, ekmek vb.) için uygun bir raf ömrü (gün) öner; ")
+            append("mevcut bir eşleşme yanlışsa düzelt.\n\n")
             append("SADECE şu JSON'u döndür, başka metin yazma:\n")
             append("""{"categories":[{"id":"KISA_BUYUK_HARF_ID","label":"Ad","emoji":"🍎","redDays":3,"yellowDays":7,"keywords":["kelime1","kelime2"]}],""")
-            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID"}]}""")
-            append("\nNot: categories listesine sadece YENİ veya DEĞİŞTİRDİĞİN kategorileri koy. ")
+            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID"}],""")
+            append(""""shelfLife":[{"keyword":"domates","days":7}]}""")
+            append("\nNot: categories ve shelfLife listelerine sadece YENİ veya DEĞİŞTİRDİĞİN kayıtları koy. ")
             append("id'ler büyük harf ve alt çizgili olsun (ör. BEBEK_MAMASI). Bugünün tarihi: ")
             append(LocalDate.now())
         }
@@ -199,7 +210,19 @@ object GeminiClient {
                     map[id] = catId
                 }
             }
-            InventoryReview(cats, map)
+
+            val shelfLife = mutableListOf<ShelfLife>()
+            root.optJSONArray("shelfLife")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val keyword = o.optString("keyword").trim().lowercase()
+                    if (keyword.isBlank()) continue
+                    val days = o.optInt("days", -1)
+                    if (days <= 0) continue
+                    shelfLife += ShelfLife(keyword, days.coerceIn(1, 3650))
+                }
+            }
+            InventoryReview(cats, map, shelfLife)
         }
     }
 

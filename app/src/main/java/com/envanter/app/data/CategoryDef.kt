@@ -88,7 +88,7 @@ object CategoryStore {
         .replace('â', 'a').replace('î', 'i').replace('û', 'u')
         .trim()
 
-    private fun tokens(s: String): List<String> =
+    fun tokens(s: String): List<String> =
         s.split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
 
     private fun levenshtein(a: String, b: String): Int {
@@ -108,7 +108,7 @@ object CategoryStore {
         return cur[b.length]
     }
 
-    private fun keywordScore(nameNorm: String, nameTokens: List<String>, kwNorm: String): Double {
+    fun keywordScore(nameNorm: String, nameTokens: List<String>, kwNorm: String): Double {
         if (kwNorm.isBlank()) return 0.0
         val kwTokens = kwNorm.split(' ').filter { it.isNotBlank() }
         if (kwTokens.size > 1) {

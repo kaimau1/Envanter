@@ -51,10 +51,26 @@ interface CategoryDao {
     suspend fun count(): Int
 }
 
-@Database(entities = [FoodItem::class, CategoryDef::class], version = 2, exportSchema = false)
+@Dao
+interface ShelfLifeDao {
+    @Query("SELECT * FROM shelf_life")
+    fun observeAll(): Flow<List<ShelfLife>>
+
+    @Query("SELECT * FROM shelf_life")
+    suspend fun getAll(): List<ShelfLife>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entries: List<ShelfLife>)
+
+    @Query("SELECT COUNT(*) FROM shelf_life")
+    suspend fun count(): Int
+}
+
+@Database(entities = [FoodItem::class, CategoryDef::class, ShelfLife::class], version = 3, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun foodDao(): FoodDao
     abstract fun categoryDao(): CategoryDao
+    abstract fun shelfLifeDao(): ShelfLifeDao
 
     companion object {
         /** items tablosunu koruyarak categories tablosunu ekler. */
@@ -73,11 +89,22 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        /** items/categories'e dokunmadan ürün bazlı raf ömrü tablosunu ekler. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS shelf_life (" +
+                        "keyword TEXT NOT NULL PRIMARY KEY, " +
+                        "days INTEGER NOT NULL)"
+                )
+            }
+        }
+
         @Volatile private var INSTANCE: AppDb? = null
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDb::class.java, "envanter.db")
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

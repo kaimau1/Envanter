@@ -4,11 +4,17 @@ import android.content.Context
 import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
+import com.envanter.app.data.ShelfLifeStore
 import kotlinx.coroutines.flow.first
 
 /** Toplu düzeltme sonucu özeti. */
-data class FixSummary(val itemsChanged: Int, val categoriesAdded: Int, val categoriesEdited: Int) {
-    val total get() = itemsChanged + categoriesAdded + categoriesEdited
+data class FixSummary(
+    val itemsChanged: Int,
+    val categoriesAdded: Int,
+    val categoriesEdited: Int,
+    val shelfLifeUpdated: Int = 0
+) {
+    val total get() = itemsChanged + categoriesAdded + categoriesEdited + shelfLifeUpdated
 }
 
 /**
@@ -29,8 +35,9 @@ object CategoryFixer {
         if (items.isEmpty()) return Result.success(FixSummary(0, 0, 0))
         val currentCats = Repository.categories().ifEmpty { CategoryStore.all }
 
-        return GeminiClient.reviewInventory(key, model, currentCats, items.map { it.id to it.name })
-            .map { review ->
+        return GeminiClient.reviewInventory(
+            key, model, currentCats, items.map { it.id to it.name }, ShelfLifeStore.all
+        ).map { review ->
                 // 1) Kategori ekleme/düzenleme
                 val existingById = currentCats.associateBy { it.id }
                 var added = 0
@@ -55,7 +62,9 @@ object CategoryFixer {
                         changed++
                     }
                 }
-                FixSummary(changed, added, edited)
+                if (review.shelfLife.isNotEmpty()) Repository.saveShelfLife(review.shelfLife)
+
+                FixSummary(changed, added, edited, review.shelfLife.size)
             }
     }
 }

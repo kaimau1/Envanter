@@ -35,11 +35,26 @@ object Repository {
                 }
             }
         }
+        scope.launch {
+            if (shelfLifeDao.count() == 0) shelfLifeDao.upsertAll(ShelfLifeStore.DEFAULTS)
+            ShelfLifeStore.update(shelfLifeDao.getAll())
+        }
+        scope.launch {
+            shelfLifeDao.observeAll().collect { list -> if (list.isNotEmpty()) ShelfLifeStore.update(list) }
+        }
         FirebaseSync.start(appContext)
     }
 
     private val dao get() = AppDb.get(appContext).foodDao()
     private val categoryDao get() = AppDb.get(appContext).categoryDao()
+    private val shelfLifeDao get() = AppDb.get(appContext).shelfLifeDao()
+
+    /** Gemini "kategorileri düzelt" ile yeni/düzeltilmiş ürün bazlı raf ömürlerini kaydeder. */
+    suspend fun saveShelfLife(entries: List<ShelfLife>) {
+        if (entries.isEmpty()) return
+        shelfLifeDao.upsertAll(entries)
+        ShelfLifeStore.update(shelfLifeDao.getAll())
+    }
 
     suspend fun categories(): List<CategoryDef> = categoryDao.getAll()
 
