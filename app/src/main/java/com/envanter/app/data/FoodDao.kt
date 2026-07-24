@@ -66,7 +66,7 @@ interface ShelfLifeDao {
     suspend fun count(): Int
 }
 
-@Database(entities = [FoodItem::class, CategoryDef::class, ShelfLife::class], version = 3, exportSchema = false)
+@Database(entities = [FoodItem::class, CategoryDef::class, ShelfLife::class], version = 4, exportSchema = false)
 abstract class AppDb : RoomDatabase() {
     abstract fun foodDao(): FoodDao
     abstract fun categoryDao(): CategoryDao
@@ -100,11 +100,18 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        /** Tarihin otomatik mi atandığını (ve kaç günle) tutan kolonu ekler. */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE items ADD COLUMN expiryAutoDays INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile private var INSTANCE: AppDb? = null
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDb::class.java, "envanter.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

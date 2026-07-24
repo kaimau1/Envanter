@@ -6,15 +6,17 @@ import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import com.envanter.app.data.ShelfLifeStore
 import kotlinx.coroutines.flow.first
+import java.time.LocalDate
 
 /** Toplu düzeltme sonucu özeti. */
 data class FixSummary(
     val itemsChanged: Int,
     val categoriesAdded: Int,
     val categoriesEdited: Int,
-    val shelfLifeUpdated: Int = 0
+    val shelfLifeUpdated: Int = 0,
+    val datesFilled: Int = 0
 ) {
-    val total get() = itemsChanged + categoriesAdded + categoriesEdited + shelfLifeUpdated
+    val total get() = itemsChanged + categoriesAdded + categoriesEdited + shelfLifeUpdated + datesFilled
 }
 
 /**
@@ -52,19 +54,44 @@ object CategoryFixer {
                 }
                 if (review.categories.isNotEmpty()) Repository.saveCategories(review.categories)
 
-                // 2) Ürün atamaları (yalnız geçerli kategoriye)
-                val validIds = (currentCats.map { it.id } + review.categories.map { it.id }).toSet()
-                var changed = 0
-                items.forEach { item ->
-                    val newCat = review.itemCategories[item.id]
-                    if (newCat != null && newCat in validIds && newCat != item.category) {
-                        Repository.save(item.copy(category = newCat))
-                        changed++
-                    }
-                }
+                // 2) Raf ömrü listesi (tarih tahminleri buradan okunacağı için önce kaydedilir)
                 if (review.shelfLife.isNotEmpty()) Repository.saveShelfLife(review.shelfLife)
 
-                FixSummary(changed, added, edited, review.shelfLife.size)
+                // 3) Ürün başına kategori + tarih; ikisi tek kayıtta birleştirilir.
+                val validIds = (currentCats.map { it.id } + review.categories.map { it.id }).toSet()
+                var changed = 0
+                var datesFilled = 0
+                items.forEach { item ->
+                    var updated = item
+
+                    val newCat = review.itemCategories[item.id]
+                    if (newCat != null && newCat in validIds && newCat != item.category) {
+                        updated = updated.copy(category = newCat)
+                        changed++
+                    }
+
+                    // Yalnız BOŞ ya da daha önce otomatik atanmış tarihlere dokunulur;
+                    // kullanıcının elle/sesle/fotoğrafla verdiği tarih korunur.
+                    if (!item.expiryFromUser) {
+                        val days = ShelfLifeStore.guess(item.name)
+                        if (days != null) {
+                            val newDate = if (item.expiryDate.isBlank()) {
+                                LocalDate.now().plusDays(days.toLong()).toString()
+                            } else {
+                                // Eklendiği günü koru: tekrar tekrar çalıştırınca tarih kaymaz.
+                                ShelfLifeStore.reproject(item.expiryDate, item.expiryAutoDays, days)
+                            }
+                            if (newDate != null && newDate != item.expiryDate) {
+                                updated = updated.copy(expiryDate = newDate, expiryAutoDays = days)
+                                datesFilled++
+                            }
+                        }
+                    }
+
+                    if (updated != item) Repository.save(updated)
+                }
+
+                FixSummary(changed, added, edited, review.shelfLife.size, datesFilled)
             }
     }
 }

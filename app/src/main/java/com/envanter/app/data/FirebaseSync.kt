@@ -114,6 +114,7 @@ object FirebaseSync {
                         quantity = doc.getDouble("quantity") ?: 1.0,
                         unit = doc.getString("unit") ?: "adet",
                         expiryDate = doc.getString("expiryDate") ?: "",
+                        expiryAutoDays = (doc.getLong("expiryAutoDays") ?: 0L).toInt(),
                         note = doc.getString("note") ?: "",
                         updatedAt = doc.getLong("updatedAt") ?: 0L,
                         deleted = doc.getBoolean("deleted") ?: false
@@ -134,6 +135,7 @@ object FirebaseSync {
                     "quantity" to item.quantity,
                     "unit" to item.unit,
                     "expiryDate" to item.expiryDate,
+                    "expiryAutoDays" to item.expiryAutoDays,
                     "note" to item.note,
                     "updatedAt" to item.updatedAt,
                     "deleted" to item.deleted

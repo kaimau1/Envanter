@@ -70,6 +70,7 @@ fun GeminiFixButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
                                 if (s.categoriesAdded > 0) parts += "${s.categoriesAdded} yeni kategori eklendi"
                                 if (s.categoriesEdited > 0) parts += "${s.categoriesEdited} kategori eşiği düzeltildi"
                                 if (s.shelfLifeUpdated > 0) parts += "${s.shelfLifeUpdated} ürün raf ömrü güncellendi"
+                                if (s.datesFilled > 0) parts += "${s.datesFilled} ürüne tarih atandı"
                                 append(parts.joinToString(", "))
                             }
                         }

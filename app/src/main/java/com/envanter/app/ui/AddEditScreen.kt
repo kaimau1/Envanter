@@ -125,6 +125,8 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
     var unitExpanded by remember { mutableStateOf(false) }
     var userTouchedCategory by rememberSaveable { mutableStateOf(false) }
     var userTouchedExpiry by rememberSaveable { mutableStateOf(false) }
+    // 0 = tarihi kullanıcı verdi (elle/sesle/fotoğrafla), >0 = otomatik tahmin (kaç günlük)
+    var expiryAutoDays by rememberSaveable { mutableStateOf(0) }
 
     val isEdit = itemId != null
 
@@ -134,6 +136,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 name = it.name; category = it.category
                 qtyText = fmtQty(it.quantity); unit = it.unit
                 expiry = it.expiryDate; note = it.note
+                expiryAutoDays = it.expiryAutoDays
                 userTouchedCategory = true
                 userTouchedExpiry = true
             }
@@ -145,7 +148,13 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         p.name?.let { if (name.isBlank()) name = it }
         p.quantity?.let { qtyText = fmtQty(it) }
         p.unit?.let { unit = it }
-        p.expiry?.let { expiry = it.toString() }
+        // Sesten/fotoğraftan gelen tarih kullanıcının verisidir: otomatik sayılmaz,
+        // sonradan raf ömrü tahminiyle de üzerine yazılmaz.
+        p.expiry?.let {
+            expiry = it.toString()
+            expiryAutoDays = 0
+            userTouchedExpiry = true
+        }
         // Kategori: önce ayrıştırıcının verdiği (DIGER değilse), yoksa isimden yerel tahmin.
         val resolved = p.category?.takeIf { it.id != CategoryStore.DEFAULT_ID }
             ?: p.name?.let { CategoryStore.guess(it) }?.takeIf { it.id != CategoryStore.DEFAULT_ID }
@@ -291,6 +300,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         if (!userTouchedExpiry && expiry.isBlank() && name.length >= 3) {
             ShelfLifeStore.guess(name)?.let { days ->
                 expiry = LocalDate.now().plusDays(days.toLong()).toString()
+                expiryAutoDays = days
             }
         }
     }
@@ -431,7 +441,9 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 trailingIcon = {
                     Row {
                         if (expiry.isNotBlank()) {
-                            TextButton(onClick = { expiry = ""; userTouchedExpiry = true }) { Text("Temizle") }
+                            TextButton(onClick = {
+                                expiry = ""; expiryAutoDays = 0; userTouchedExpiry = true
+                            }) { Text("Temizle") }
                         }
                         TextButton(onClick = { showDatePicker = true }) { Text("Seç") }
                     }
@@ -464,6 +476,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                                 quantity = qty,
                                 unit = unit,
                                 expiryDate = expiry,
+                                expiryAutoDays = expiryAutoDays,
                                 note = note.trim()
                             )
                         )
@@ -491,6 +504,7 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 TextButton(onClick = {
                     pickerState.selectedDateMillis?.let { ms ->
                         expiry = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString()
+                        expiryAutoDays = 0 // elle seçilen tarih otomatik güncellenmez
                         userTouchedExpiry = true
                     }
                     showDatePicker = false

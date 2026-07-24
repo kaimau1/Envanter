@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.time.LocalDate
 
 /**
  * Ürün adından tahmini raf ömrü (gün). Etiketinde son kullanma tarihi olmayan
@@ -17,29 +18,6 @@ data class ShelfLife(
 )
 
 object ShelfLifeStore {
-    private val _flow = MutableStateFlow<List<ShelfLife>>(emptyList())
-    val flow: StateFlow<List<ShelfLife>> = _flow
-    val all: List<ShelfLife> get() = _flow.value
-
-    fun update(list: List<ShelfLife>) {
-        _flow.value = list
-    }
-
-    /** Ürün adına en yakın eşleşen raf ömrünü (gün) döndürür; tahminidir, bulunamazsa null. */
-    fun guess(name: String): Int? {
-        if (name.isBlank()) return null
-        val nameNorm = CategoryStore.normalize(name)
-        val nameTokens = CategoryStore.tokens(nameNorm)
-        if (nameTokens.isEmpty()) return null
-        var best: ShelfLife? = null
-        var bestScore = 0.0
-        for (entry in all) {
-            val s = CategoryStore.keywordScore(nameNorm, nameTokens, CategoryStore.normalize(entry.keyword))
-            if (s > bestScore) { bestScore = s; best = entry }
-        }
-        return if (bestScore >= 1.5) best?.days else null
-    }
-
     // ponytail: kaba tahminler, Gemini "kategorileri düzelt" ile ürün bazlı düzeltebilir.
     val DEFAULTS: List<ShelfLife> = listOf(
         ShelfLife("domates", 7), ShelfLife("salatalık", 7), ShelfLife("hıyar", 7),
@@ -57,4 +35,39 @@ object ShelfLifeStore {
         ShelfLife("vişne", 5), ShelfLife("nar", 21), ShelfLife("incir", 3),
         ShelfLife("avokado", 5), ShelfLife("kivi", 14), ShelfLife("ananas", 5)
     )
+
+    // Varsayılanlarla başlar: Room'dan yükleme asenkron olduğu için boş başlarsa
+    // uygulamanın ilk saniyelerinde açılan ekleme ekranı tahmin yapamıyordu.
+    private val _flow = MutableStateFlow(DEFAULTS)
+    val flow: StateFlow<List<ShelfLife>> = _flow
+    val all: List<ShelfLife> get() = _flow.value
+
+    fun update(list: List<ShelfLife>) {
+        _flow.value = list
+    }
+
+    /**
+     * Otomatik atanmış bir tarihi, ürünün eklendiği günü koruyarak yeni gün
+     * sayısına taşır. Aynı gün sayısıyla çağrılırsa tarih değişmez; böylece
+     * "Gemini ile düzelt"e her basışta tarih ileri kaymaz.
+     */
+    fun reproject(expiryDate: String, oldDays: Int, newDays: Int): String? {
+        val d = runCatching { LocalDate.parse(expiryDate) }.getOrNull() ?: return null
+        return d.minusDays(oldDays.toLong()).plusDays(newDays.toLong()).toString()
+    }
+
+    /** Ürün adına en yakın eşleşen raf ömrünü (gün) döndürür; tahminidir, bulunamazsa null. */
+    fun guess(name: String): Int? {
+        if (name.isBlank()) return null
+        val nameNorm = CategoryStore.normalize(name)
+        val nameTokens = CategoryStore.tokens(nameNorm)
+        if (nameTokens.isEmpty()) return null
+        var best: ShelfLife? = null
+        var bestScore = 0.0
+        for (entry in all) {
+            val s = CategoryStore.keywordScore(nameNorm, nameTokens, CategoryStore.normalize(entry.keyword))
+            if (s > bestScore) { bestScore = s; best = entry }
+        }
+        return if (bestScore >= 1.5) best?.days else null
+    }
 }
