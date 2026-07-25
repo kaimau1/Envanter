@@ -29,10 +29,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +43,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.envanter.app.data.DraftStore
 import com.envanter.app.gemini.MediaAnalyzer
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Sağ alt köşedeki "basılı tut, konuş" mikrofon tuşu — uygulamanın en kısa yolu.
@@ -60,11 +64,47 @@ fun VoiceHoldFab(
     val context = LocalContext.current
     val onReady by rememberUpdatedState(onProductsReady)
 
+    val scope = rememberCoroutineScope()
     var listening by remember { mutableStateOf(false) }
     var analyzing by remember { mutableStateOf(false) }
     var heard by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
-    var toAnalyze by remember { mutableStateOf<String?>(null) }
+    // Aynı konuşma hem onResults hem onError'dan gelirse iki kez analiz edilmesin.
+    val consumed = remember { AtomicBoolean(false) }
+
+    /**
+     * Konuşmayı analiz edip onay ekranını açar.
+     *
+     * remember içinde tutuluyor: tanıyıcının geri çağrıları bu lambdayı bir kez
+     * yakalar, her yeniden çizimde yenisi oluşmaz. (Önceden LaunchedEffect ile
+     * yapılıyordu; efektin anahtarı efektin içinde sıfırlandığı için Compose
+     * coroutine'i hemen iptal ediyor, analiz hiç çalışmıyordu.)
+     */
+    val analyze = remember<(String) -> Unit> {
+        { text ->
+            scope.launch {
+                analyzing = true
+                message = "İşleniyor…"
+                val products = try {
+                    withTimeout(90_000) {
+                        MediaAnalyzer.fromSpeech(context, text) { message = it }.getOrElse { emptyList() }
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    emptyList()
+                } finally {
+                    analyzing = false
+                }
+                if (products.isEmpty()) {
+                    message = "\"$text\" içinde ürün bulunamadı, tekrar dene."
+                    return@launch
+                }
+                DraftStore.addParsed(products, "ses")
+                heard = ""
+                message = ""
+                onReady()
+            }
+        }
+    }
 
     var granted by remember {
         mutableStateOf(
@@ -95,7 +135,7 @@ fun VoiceHoldFab(
                 // duyulan kısmi metin varsa onu kullan, yoksa kullanıcıyı yönlendir.
                 val partial = heard.trim()
                 if (partial.isNotBlank() && error in RETRYABLE_ERRORS) {
-                    toAnalyze = partial
+                    if (consumed.compareAndSet(false, true)) analyze(partial)
                     return
                 }
                 message = when (error) {
@@ -118,30 +158,14 @@ fun VoiceHoldFab(
                 val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()?.takeIf { it.isNotBlank() }
                     ?: heard.trim().takeIf { it.isNotBlank() }
-                if (spoken != null) { heard = spoken; toAnalyze = spoken }
-                else message = "Duyamadım — tuşu basılı tutup konuş."
+                if (spoken != null) {
+                    heard = spoken
+                    if (consumed.compareAndSet(false, true)) analyze(spoken)
+                } else message = "Duyamadım — tuşu basılı tutup konuş."
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
         onDispose { recognizer?.destroy() }
-    }
-
-    LaunchedEffect(toAnalyze) {
-        val text = toAnalyze ?: return@LaunchedEffect
-        toAnalyze = null
-        analyzing = true
-        message = "İşleniyor…"
-        val products = MediaAnalyzer.fromSpeech(context, text) { message = it }
-            .getOrElse { emptyList() }
-        analyzing = false
-        if (products.isEmpty()) {
-            message = "\"$text\" içinde ürün bulunamadı."
-            return@LaunchedEffect
-        }
-        DraftStore.addParsed(products, "ses")
-        heard = ""
-        message = ""
-        onReady()
     }
 
     fun startListening() {
@@ -151,6 +175,7 @@ fun VoiceHoldFab(
         heard = ""
         message = "Dinleniyor…"
         listening = true
+        consumed.set(false)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
@@ -167,7 +192,13 @@ fun VoiceHoldFab(
     }
 
     val diameter by animateDpAsState(if (listening) 76.dp else 64.dp, label = "mic")
-    val bubble = heard.ifBlank { message }
+    // Dinlerken duyulan metni göster; analiz/hata durumunda durum mesajı öne geçsin —
+    // yoksa duyulan metin hata mesajını gizliyor ve ekran "takılmış" gibi görünüyor.
+    val bubble = when {
+        listening -> heard.ifBlank { message }
+        analyzing || message.isNotBlank() -> message
+        else -> heard
+    }
 
     Column(horizontalAlignment = Alignment.End, modifier = modifier) {
         if (bubble.isNotBlank()) {

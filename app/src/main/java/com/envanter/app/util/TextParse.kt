@@ -37,7 +37,12 @@ object TextParse {
     private val numericDate = Regex("""(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})""")
     private val monthYearOnly = Regex("""(?<![\d./\-])(\d{1,2})[./\-](\d{4})(?![\d./\-])""")
     private val verbalDate = Regex("""(\d{1,2})\s+(ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)(?:\s+(\d{4}))?""", RegexOption.IGNORE_CASE)
-    private val qtyRegex = Regex("""(\d+(?:[.,]\d+)?)\s*(adet|tane|kilo|kg|gram|gr|g|litre|lt|l|ml|mililitre|paket|kutu|şişe|sise)""", RegexOption.IGNORE_CASE)
+    // Miktar sayıyla ("2 litre") ya da sözcükle ("bir paket") söylenebilir.
+    private val qtyRegex = Regex(
+        """\b(\d+(?:[.,]\d+)?|bir|iki|üç|uc|dört|dort|beş|bes|altı|alti|yedi|sekiz|dokuz|on)\b\s*""" +
+            """\b(adet|tane|kilo|kg|gram|gr|g|litre|lt|l|ml|mililitre|paket|kutu|şişe|sise)\b""",
+        RegexOption.IGNORE_CASE
+    )
 
     fun parseDates(text: String): List<LocalDate> {
         val found = mutableListOf<LocalDate>()
@@ -69,10 +74,37 @@ object TextParse {
         return found
     }
 
+    /** Türkçe sayı sözcükleri: "bir paket", "iki yıl sonra" gibi ifadeler için. */
+    private val numberWords = mapOf(
+        "bir" to 1, "iki" to 2, "üç" to 3, "uc" to 3, "dört" to 4, "dort" to 4,
+        "beş" to 5, "bes" to 5, "altı" to 6, "alti" to 6, "yedi" to 7, "sekiz" to 8,
+        "dokuz" to 9, "on" to 10, "yarım" to 0, "yarim" to 0
+    )
+
+    private val relativeDate = Regex(
+        """(\d+|bir|iki|üç|uc|dört|dort|beş|bes|altı|alti|yedi|sekiz|dokuz|on)\s*""" +
+            """(gün|gun|hafta|ay|yıl|yil|sene)\s*(?:sonra|sonrasi|sonrası|içinde|icinde)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** "1 yıl sonra", "iki hafta sonra", "6 ay içinde" gibi göreli tarihleri çözer. */
+    fun parseRelativeDate(text: String, from: LocalDate = LocalDate.now()): LocalDate? {
+        val m = relativeDate.find(text.lowercase(TR)) ?: return null
+        val n = m.groupValues[1].let { it.toIntOrNull() ?: numberWords[it] } ?: return null
+        if (n <= 0) return null
+        return when (m.groupValues[2].lowercase(TR)) {
+            "gün", "gun" -> from.plusDays(n.toLong())
+            "hafta" -> from.plusWeeks(n.toLong())
+            "ay" -> from.plusMonths(n.toLong())
+            else -> from.plusYears(n.toLong())
+        }
+    }
+
     /** OCR metninde SKT/TETT satırına en yakın, yoksa en ileri tarihi seç. */
     fun bestExpiry(text: String): LocalDate? {
         val dates = parseDates(text)
-        if (dates.isEmpty()) return null
+        // Takvim tarihi yoksa "1 yıl sonra" gibi göreli ifadeye bak.
+        if (dates.isEmpty()) return parseRelativeDate(text)
         val future = dates.filter { !it.isBefore(LocalDate.now().minusMonths(1)) }
         return (future.ifEmpty { dates }).max()
     }
@@ -83,7 +115,9 @@ object TextParse {
         var qty: Double? = null
         var unit: String? = null
         qtyRegex.find(t)?.let { m ->
-            qty = m.groupValues[1].replace(',', '.').toDoubleOrNull()
+            val raw = m.groupValues[1]
+            qty = raw.replace(',', '.').toDoubleOrNull()
+                ?: numberWords[raw.lowercase(TR)]?.takeIf { it > 0 }?.toDouble()
             unit = when (m.groupValues[2].lowercase(TR)) {
                 "tane", "adet" -> "adet"
                 "kilo", "kg" -> "kg"
@@ -99,7 +133,16 @@ object TextParse {
         name = name.replace(qtyRegex, " ")
         name = name.replace(numericDate, " ")
         name = name.replace(verbalDate, " ")
-        name = name.replace(Regex("""son kullanma tarihi|son kullanma|kullanma tarihi|tarihi|skt|tett|ekle|envantere|envanter"""), " ")
+        name = name.replace(relativeDate, " ")
+        // Konuşma dolgu sözcükleri: "1 kilo süt aldım ... tarihi doluyor" -> "süt"
+        name = name.replace(
+            Regex(
+                """son kullanma tarihi|son kullanma|kullanma tarihi|tarihi|skt|tett""" +
+                    """|ekle|envantere|envanter|aldım|aldim|aldık|aldik|doluyor|dolacak""" +
+                    """|bitiyor|geçiyor|geciyor|kaldı|kaldi"""
+            ),
+            " "
+        )
         name = name.replace(Regex("\\s+"), " ").trim()
         val cleanName = name.replaceFirstChar { it.titlecase(TR) }.ifBlank { null }
         return ParsedProduct(
@@ -127,8 +170,11 @@ object TextParse {
     /** "ve", "bir de", "ayrıca", virgül… gibi ayraçlardan böler; tarihleri bozmadan. */
     fun splitProducts(text: String): List<String> {
         // Önce tarih ifadelerini koru: "12 ağustos 2026" içindeki boşluklar ayraç değildir.
+        // "daha sonra" ayraç sayılır ama yalın "sonra" sayılmaz: "1 yıl sonra" bir
+        // tarih ifadesidir, orada bölmek ürünü ikiye koparır.
         val separator = Regex(
-            """\s*(?:,|;|\bve\b|\bbir de\b|\bayrıca\b|\bayrica\b|\bartı\b|\barti\b|\bsonra da\b|\bbir tane de\b)\s*""",
+            """\s*(?:,|;|\bve\b|\bbir de\b|\bayrıca\b|\bayrica\b|\bartı\b|\barti\b""" +
+                """|\bdaha sonra\b|\bsonra da\b|\bbir tane de\b)\s*""",
             RegexOption.IGNORE_CASE
         )
         return text.split(separator).map { it.trim() }.filter { it.isNotBlank() }
