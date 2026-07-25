@@ -29,8 +29,6 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -348,26 +346,13 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                     Text(if (voiceMode == VoiceMode.HOLD) " Basılı Tut, Konuş" else " Sesle Söyle")
                 }
             }
-            // Çok ürünlü kaynaklar toplu ekleme ekranına yönlendirir.
             if (!isEdit) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { nav.navigate("batch?mode=gallery") },
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy
-                    ) {
-                        Icon(Icons.Filled.PhotoLibrary, null)
-                        Text(" Galeriden", maxLines = 1)
-                    }
-                    OutlinedButton(
-                        onClick = { nav.navigate("batch?mode=video") },
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy
-                    ) {
-                        Icon(Icons.Filled.Videocam, null)
-                        Text(" Videodan", maxLines = 1)
-                    }
-                }
+                Text(
+                    "İpucu: fotoğrafta veya söylediğin cümlede birden fazla ürün varsa " +
+                        "hepsi otomatik ayrıştırılıp kontrol listesine düşer.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             if (busy) {
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {

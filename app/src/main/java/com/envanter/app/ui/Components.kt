@@ -1,7 +1,9 @@
 package com.envanter.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -94,6 +98,44 @@ fun GeminiFixButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 2.dp)
             )
+        }
+    }
+}
+
+/**
+ * Kaynak/kısayol tuşu (ana sayfa ve toplu ekleme ekranında ortak).
+ * [onLongClick] verilirse basılı tutmak ikinci eylemi (ör. galeriden seçme)
+ * çalıştırır; böylece dört kaynak tek satıra sığar.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun SourceTile(
+    modifier: Modifier,
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    enabled: Boolean = true
+) {
+    val tint = if (enabled) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    OutlinedCard(
+        modifier = modifier.combinedClickable(
+            enabled = enabled,
+            onClick = onClick,
+            onLongClick = onLongClick
+        ),
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(icon, null, modifier = Modifier.size(22.dp), tint = tint)
+            Text(label, fontSize = 11.sp, maxLines = 1, color = tint)
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.envanter.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,15 +14,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,12 +52,10 @@ fun DashboardScreen(nav: NavHostController) {
     val yellow = items.filter { it.urgency == Urgency.YELLOW }
 
     var sort by remember { mutableStateOf(SortOption.EXPIRY_ASC) }
-    // İsim/son eklenen sıralamada tüm ürünler; tarih sıralamalarında tarihli olanlar.
-    val base = when (sort) {
-        SortOption.NAME_ASC, SortOption.RECENT, SortOption.CATEGORY -> items
-        else -> items.filter { it.daysLeft != null }
-    }
-    val shown = sort.sort(base).take(12)
+    // Tarihi olmayan ürünler de listelenir (tarih sıralamalarında en sona düşerler),
+    // aksi halde "son kullanma tarihi girilmemiş" ürünler ana sayfada hiç görünmüyordu.
+    val shown = sort.sort(items)
+    val datelessCount = items.count { it.daysLeft == null }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -99,29 +96,32 @@ fun DashboardScreen(nav: NavHostController) {
                 }
             }
         }
+        // Tek satır, dört kaynak. Kaç ürün olduğunu sistem kendisi ayırt eder:
+        // tek ürün çıkarsa doğrudan ekleme formu, birden fazla çıkarsa kontrol listesi açılır.
+        // Basılı tutmak fotoğraf/videoyu galeriden seçmeye yarar.
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QuickAddButton(Modifier.weight(1f), Icons.Filled.Edit, "Elle Ekle") { nav.navigate("edit") }
-                QuickAddButton(Modifier.weight(1f), Icons.Filled.PhotoCamera, "Fotoğraf") { nav.navigate("edit?mode=photo") }
-                QuickAddButton(Modifier.weight(1f), Icons.Filled.KeyboardVoice, "Sesle") { nav.navigate("edit?mode=voice") }
-            }
-        }
-        // Tek videoda / birden çok fotoğrafta / tek cümlede geçen TÜM ürünleri toplu ekleme.
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QuickAddButton(Modifier.weight(1f), Icons.Filled.Videocam, "Videodan") { nav.navigate("batch?mode=video") }
-                QuickAddButton(Modifier.weight(1f), Icons.Filled.PhotoLibrary, "Galeriden") { nav.navigate("batch?mode=gallery") }
-                QuickAddButton(Modifier.weight(1f), Icons.Filled.PlaylistAdd, "Toplu Ekle") { nav.navigate("batch") }
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    SourceTile(Modifier.weight(1f), Icons.Filled.Edit, "Elle",
+                        onClick = { nav.navigate("edit") })
+                    SourceTile(Modifier.weight(1f), Icons.Filled.PhotoCamera, "Fotoğraf",
+                        onClick = { nav.navigate("edit?mode=photo") },
+                        onLongClick = { nav.navigate("batch?mode=gallery") })
+                    SourceTile(Modifier.weight(1f), Icons.Filled.Videocam, "Video",
+                        onClick = { nav.navigate("batch?mode=video") },
+                        onLongClick = { nav.navigate("batch?mode=videoGallery") })
+                    SourceTile(Modifier.weight(1f), Icons.Filled.KeyboardVoice, "Sesle",
+                        onClick = { nav.navigate("edit?mode=voice") })
+                }
+                Text(
+                    "Birden fazla ürün otomatik ayrıştırılır • galeriden seçmek için 📷 veya 🎥 tuşunu basılı tut",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
         }
         if (items.isNotEmpty()) {
@@ -136,12 +136,20 @@ fun DashboardScreen(nav: NavHostController) {
                     .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "⏰ Ürünlerim",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "⏰ Ürünlerim (${items.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (datelessCount > 0) {
+                        Text(
+                            "$datelessCount ürünün son kullanma tarihi yok — dokunup ekleyebilirsin",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 SortDropdown(sort) { sort = it }
             }
         }
@@ -158,28 +166,7 @@ fun DashboardScreen(nav: NavHostController) {
         items(shown, key = { it.id }) { item ->
             ItemRow(item, onClick = { nav.navigate("edit/${item.id}") })
         }
-    }
-}
-
-@Composable
-private fun QuickAddButton(
-    modifier: Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp, horizontal = 4.dp)
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(icon, null, modifier = Modifier.size(22.dp))
-            Text(label, fontSize = 12.sp, maxLines = 1)
-        }
+        item { Box(Modifier.padding(bottom = 16.dp)) {} }
     }
 }
 

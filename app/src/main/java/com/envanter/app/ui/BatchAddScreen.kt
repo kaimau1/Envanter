@@ -25,8 +25,6 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -249,46 +247,42 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
         ) {
             item {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    // Dört kaynak tek satırda: basılı tutmak galeriden seçmeye yarar.
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        SourceTile(
+                            Modifier.weight(1f), Icons.Filled.Videocam, "Video",
+                            onClick = { startVideoCapture() },
+                            onLongClick = {
+                                pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                            },
+                            enabled = !busy
+                        )
+                        SourceTile(
+                            Modifier.weight(1f), Icons.Filled.PhotoCamera, "Fotoğraf",
+                            onClick = { startPhotoCapture() },
+                            onLongClick = {
+                                pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            enabled = !busy
+                        )
+                        SourceTile(
+                            Modifier.weight(1f), Icons.Filled.KeyboardVoice, "Sesle",
+                            onClick = { launchSpeech() },
+                            enabled = !busy
+                        )
+                        SourceTile(
+                            Modifier.weight(1f), Icons.Filled.Add, "Satır",
+                            onClick = { DraftStore.addBlank() },
+                            enabled = !busy
+                        )
+                    }
                     Text(
-                        "Bir videoda, birden çok fotoğrafta veya tek cümlede kaç ürün varsa hepsi birden eklenir.",
-                        style = MaterialTheme.typography.bodySmall,
+                        "Bir videoda, fotoğrafta veya cümlede kaç ürün varsa hepsi birden eklenir • " +
+                            "galeriden seçmek için 📷 veya 🎥 tuşunu basılı tut",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        modifier = Modifier.padding(top = 6.dp)
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        SourceButton(Modifier.weight(1f), Icons.Filled.Videocam, "Video Çek", !busy) {
-                            startVideoCapture()
-                        }
-                        SourceButton(Modifier.weight(1f), Icons.Filled.VideoLibrary, "Galeriden Video", !busy) {
-                            pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                        }
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                    ) {
-                        SourceButton(Modifier.weight(1f), Icons.Filled.PhotoCamera, "Fotoğraf Çek", !busy) {
-                            startPhotoCapture()
-                        }
-                        SourceButton(Modifier.weight(1f), Icons.Filled.PhotoLibrary, "Galeriden Fotoğraf", !busy) {
-                            pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        }
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                    ) {
-                        SourceButton(Modifier.weight(1f), Icons.Filled.KeyboardVoice, "Sesle Say", !busy) {
-                            launchSpeech()
-                        }
-                        SourceButton(Modifier.weight(1f), Icons.Filled.Add, "Boş Satır", !busy) {
-                            DraftStore.addBlank()
-                        }
-                    }
                     if (!geminiReady) {
                         Text(
                             "⚠️ Video ve çoklu ürün analizi için Ayarlar → Gemini API anahtarı gerekir. " +
@@ -364,25 +358,6 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
             },
             dismissButton = { TextButton(onClick = { datePickerFor = null }) { Text("İptal") } }
         ) { DatePicker(state = pickerState) }
-    }
-}
-
-@Composable
-private fun SourceButton(
-    modifier: Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier,
-        enabled = enabled,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp, horizontal = 6.dp)
-    ) {
-        Icon(icon, null, modifier = Modifier.size(18.dp))
-        Text(" $label", fontSize = 12.sp, maxLines = 1)
     }
 }
 
