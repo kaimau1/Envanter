@@ -210,7 +210,15 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Toplu Ekle") },
+                title = {
+                    Text(
+                        when (drafts.size) {
+                            0 -> "Ürün Ekle"
+                            1 -> "Ürünü Onayla"
+                            else -> "${drafts.size} Ürünü Onayla"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.Filled.ArrowBack, "geri") }
                 },

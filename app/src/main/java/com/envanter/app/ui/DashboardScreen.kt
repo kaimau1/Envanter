@@ -57,6 +57,7 @@ fun DashboardScreen(nav: NavHostController) {
     val shown = sort.sort(items)
     val datelessCount = items.count { it.daysLeft == null }
 
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -166,7 +167,17 @@ fun DashboardScreen(nav: NavHostController) {
         items(shown, key = { it.id }) { item ->
             ItemRow(item, onClick = { nav.navigate("edit/${item.id}") })
         }
-        item { Box(Modifier.padding(bottom = 16.dp)) {} }
+        // Mikrofon tuşunun altında kalan son satırı görünür tutmak için boşluk.
+        item { Box(Modifier.padding(bottom = 96.dp)) {} }
+    }
+
+        // En pratik yol: basılı tut, konuş, bırak. Onay ekranı analizden sonra açılır.
+        VoiceHoldFab(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 18.dp, bottom = 18.dp),
+            onProductsReady = { nav.navigate("batch") }
+        )
     }
 }
 
