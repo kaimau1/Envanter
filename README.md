@@ -7,7 +7,9 @@ sade ve pratik bir Android uygulaması.
 
 - **🎤 Basılı tut, konuş (en pratik yol):** ana sayfanın sağ alt köşesindeki mikrofon
   tuşuna basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz), parmağını çekince
-  konuşmayı analiz eder. Tek üründe de, "2 litre süt, 3 adet yumurta ve bir paket ekmek"
+  konuşmayı analiz eder. **Parmak basılı olduğu sürece kesilmez:** cihazın ses
+  tanıyıcısı sessizlikte oturumu kapatsa bile metin biriktirilip dinleme sürdürülür,
+  yani cümleler arasında rahatça durabilirsin. Tek üründe de, "2 litre süt, 3 adet yumurta ve bir paket ekmek"
   gibi çok üründe de çalışır. Onay ekranı **ancak analiz bittikten sonra** açılır,
   böylece konuşurken araya ekran girmez. Konuştuğun metin tuşun üstünde canlı görünür.
 - **Tek satırda dört ekleme yolu:** ✏️ elle, 📷 fotoğrafla, 🎥 videoyla, 🎤 sesle.

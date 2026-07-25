@@ -1,15 +1,7 @@
 package com.envanter.app.ui
 
-import android.Manifest
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,7 +19,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,21 +30,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.envanter.app.data.DraftStore
 import com.envanter.app.gemini.MediaAnalyzer
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Sağ alt köşedeki "basılı tut, konuş" mikrofon tuşu — uygulamanın en kısa yolu.
  *
- * Basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz), parmağı çekince
- * kaydı kapatıp metni analiz eder. Tek cümlede bir ya da birden fazla ürün
- * olabilir; ikisi de desteklenir. Ekleme/onay ekranı ancak analiz bittikten
- * sonra açılır, böylece konuşurken araya ekran girmez.
+ * Basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz). Parmak basılı olduğu
+ * sürece dinlemeye devam eder: cihazın tanıyıcısı sessizlikte oturumu kapatsa
+ * bile metin biriktirilip dinleme sürdürülür, yani cümleler arasında durabilir
+ * ve konuşman kesilmez. Analiz ve onay ekranı ancak parmağı çekince başlar.
+ * Tek ürün de, tek seferde sayılan birden fazla ürün de desteklenir.
  */
 @Composable
 fun VoiceHoldFab(
@@ -62,142 +51,45 @@ fun VoiceHoldFab(
     onProductsReady: () -> Unit
 ) {
     val context = LocalContext.current
-    val onReady by rememberUpdatedState(onProductsReady)
-
     val scope = rememberCoroutineScope()
-    var listening by remember { mutableStateOf(false) }
+    val onReady by rememberUpdatedState(onProductsReady)
     var analyzing by remember { mutableStateOf(false) }
-    var heard by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf("") }
-    // Aynı konuşma hem onResults hem onError'dan gelirse iki kez analiz edilmesin.
-    val consumed = remember { AtomicBoolean(false) }
 
-    /**
-     * Konuşmayı analiz edip onay ekranını açar.
-     *
-     * remember içinde tutuluyor: tanıyıcının geri çağrıları bu lambdayı bir kez
-     * yakalar, her yeniden çizimde yenisi oluşmaz. (Önceden LaunchedEffect ile
-     * yapılıyordu; efektin anahtarı efektin içinde sıfırlandığı için Compose
-     * coroutine'i hemen iptal ediyor, analiz hiç çalışmıyordu.)
-     */
-    val analyze = remember<(String) -> Unit> {
-        { text ->
-            scope.launch {
-                analyzing = true
-                message = "İşleniyor…"
-                val products = try {
-                    withTimeout(90_000) {
-                        MediaAnalyzer.fromSpeech(context, text) { message = it }.getOrElse { emptyList() }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    emptyList()
-                } finally {
-                    analyzing = false
+    var analyzeMessage by remember { mutableStateOf("") }
+
+    // Analiz parmak çekildikten sonra, biriken metnin tamamıyla bir kez çalışır.
+    val voice = rememberHoldToTalk { text ->
+        scope.launch {
+            analyzing = true
+            analyzeMessage = "İşleniyor…"
+            val products = try {
+                withTimeout(90_000) {
+                    MediaAnalyzer.fromSpeech(context, text) { analyzeMessage = it }
+                        .getOrElse { emptyList() }
                 }
-                if (products.isEmpty()) {
-                    message = "\"$text\" içinde ürün bulunamadı, tekrar dene."
-                    return@launch
-                }
-                DraftStore.addParsed(products, "ses")
-                heard = ""
-                message = ""
-                onReady()
+            } catch (e: TimeoutCancellationException) {
+                emptyList()
+            } finally {
+                analyzing = false
             }
+            if (products.isEmpty()) {
+                analyzeMessage = "\"$text\" içinde ürün bulunamadı, tekrar dene."
+                return@launch
+            }
+            analyzeMessage = ""
+            DraftStore.addParsed(products, "ses")
+            onReady()
         }
     }
 
-    var granted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        )
-    }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        granted = ok
-        message = if (ok) "Hazır — basılı tutup konuş." else "Mikrofon izni verilmedi."
-    }
-
-    val available = remember { SpeechRecognizer.isRecognitionAvailable(context) }
-    val recognizer = remember { if (available) SpeechRecognizer.createSpeechRecognizer(context) else null }
-
-    // Tanıyıcının geri çağrıları yalnızca durum yazar; analiz aşağıdaki
-    // LaunchedEffect'te yapılır, böylece eski closure'lara takılmaz.
-    DisposableEffect(recognizer) {
-        recognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { message = "Dinleniyor…" }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { listening = false }
-            override fun onError(error: Int) {
-                listening = false
-                // Kısa basışlarda sonuç gelmeden hata düşebiliyor; o ana kadar
-                // duyulan kısmi metin varsa onu kullan, yoksa kullanıcıyı yönlendir.
-                val partial = heard.trim()
-                if (partial.isNotBlank() && error in RETRYABLE_ERRORS) {
-                    if (consumed.compareAndSet(false, true)) analyze(partial)
-                    return
-                }
-                message = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH,
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Duyamadım — tuşu basılı tutup konuş."
-                    SpeechRecognizer.ERROR_NETWORK,
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Ses tanıma için internet gerekiyor."
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mikrofon izni gerekiyor."
-                    SpeechRecognizer.ERROR_CLIENT -> ""
-                    else -> "Ses tanıma hatası ($error)"
-                }
-            }
-            override fun onPartialResults(results: Bundle?) {
-                results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.takeIf { it.isNotBlank() }
-                    ?.let { heard = it }
-            }
-            override fun onResults(results: Bundle?) {
-                listening = false
-                val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.takeIf { it.isNotBlank() }
-                    ?: heard.trim().takeIf { it.isNotBlank() }
-                if (spoken != null) {
-                    heard = spoken
-                    if (consumed.compareAndSet(false, true)) analyze(spoken)
-                } else message = "Duyamadım — tuşu basılı tutup konuş."
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-        onDispose { recognizer?.destroy() }
-    }
-
-    fun startListening() {
-        if (!available) { message = "Bu cihazda ses tanıma yok."; return }
-        if (!granted) { permission.launch(Manifest.permission.RECORD_AUDIO); return }
-        if (analyzing) return
-        heard = ""
-        message = "Dinleniyor…"
-        listening = true
-        consumed.set(false)
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-        }
-        runCatching { recognizer?.startListening(intent) }
-            .onFailure { listening = false; message = "Ses tanıma başlatılamadı." }
-    }
-
-    fun stopListening() {
-        if (!listening) return
-        runCatching { recognizer?.stopListening() }
-    }
-
-    val diameter by animateDpAsState(if (listening) 76.dp else 64.dp, label = "mic")
-    // Dinlerken duyulan metni göster; analiz/hata durumunda durum mesajı öne geçsin —
-    // yoksa duyulan metin hata mesajını gizliyor ve ekran "takılmış" gibi görünüyor.
+    val diameter by animateDpAsState(if (voice.listening) 76.dp else 64.dp, label = "mic")
+    // Onay ekranından dönüldüğünde eski metin baloncukta kalmasın.
     val bubble = when {
-        listening -> heard.ifBlank { message }
-        analyzing || message.isNotBlank() -> message
-        else -> heard
+        voice.listening -> voice.heard.ifBlank { voice.message }
+        analyzing -> analyzeMessage.ifBlank { "İşleniyor…" }
+        analyzeMessage.isNotBlank() -> analyzeMessage
+        voice.message.isNotBlank() -> voice.message
+        else -> ""
     }
 
     Column(horizontalAlignment = Alignment.End, modifier = modifier) {
@@ -222,17 +114,20 @@ fun VoiceHoldFab(
         }
         Surface(
             shape = CircleShape,
-            color = if (listening) MaterialTheme.colorScheme.errorContainer
+            color = if (voice.listening) MaterialTheme.colorScheme.errorContainer
             else MaterialTheme.colorScheme.primaryContainer,
             shadowElevation = 6.dp,
             modifier = Modifier
                 .size(diameter)
-                .pointerInput(available, granted, analyzing) {
+                .pointerInput(analyzing) {
                     detectTapGestures(
                         onPress = {
-                            startListening()
-                            tryAwaitRelease()
-                            stopListening()
+                            if (!analyzing) {
+                                analyzeMessage = ""
+                                voice.press()
+                                tryAwaitRelease()
+                                voice.release()
+                            }
                         }
                     )
                 }
@@ -242,17 +137,10 @@ fun VoiceHoldFab(
                     Icons.Filled.KeyboardVoice,
                     "sesle ekle — basılı tut",
                     modifier = Modifier.size(30.dp),
-                    tint = if (listening) MaterialTheme.colorScheme.onErrorContainer
+                    tint = if (voice.listening) MaterialTheme.colorScheme.onErrorContainer
                     else MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
         }
     }
 }
-
-/** Kısmi metin varsa analize devam edilebilecek hatalar. */
-private val RETRYABLE_ERRORS = setOf(
-    SpeechRecognizer.ERROR_NO_MATCH,
-    SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-    SpeechRecognizer.ERROR_CLIENT
-)
