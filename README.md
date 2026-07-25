@@ -5,18 +5,29 @@ sade ve pratik bir Android uygulaması.
 
 ## Özellikler
 
-- **Beş yolla ürün ekleme:** elle, 📷 fotoğrafla (etiket/tarih otomatik taranır), 🎤 sesle
-  ("3 adet süt son kullanma 12 ağustos" demen yeterli), 🎥 videoyla ve 🖼️ galeriden
-- **Toplu ekleme (çoklu ürün):** tek seferde birden fazla ürün eklenir —
-  - 🎥 **Videodan:** markette/mutfakta çektiğin videoyu Gemini baştan sona izler, gördüğü
+- **🎤 Basılı tut, konuş (en pratik yol):** ana sayfanın sağ alt köşesindeki mikrofon
+  tuşuna basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz), parmağını çekince
+  konuşmayı analiz eder. **Parmak basılı olduğu sürece kesilmez:** cihazın ses
+  tanıyıcısı sessizlikte oturumu kapatsa bile metin biriktirilip dinleme sürdürülür,
+  yani cümleler arasında rahatça durabilirsin. Tek üründe de, "2 litre süt, 3 adet yumurta ve bir paket ekmek"
+  gibi çok üründe de çalışır. Onay ekranı **ancak analiz bittikten sonra** açılır,
+  böylece konuşurken araya ekran girmez. Konuştuğun metin tuşun üstünde canlı görünür.
+- **Tek satırda dört ekleme yolu:** ✏️ elle, 📷 fotoğrafla, 🎥 videoyla, 🎤 sesle.
+  Ayrı "çoklu ekleme" tuşu yok — **kaç ürün olduğunu sistem kendisi ayırt eder:**
+  tek ürün çıkarsa doğrudan ekleme formu, birden fazla çıkarsa kontrol listesi açılır.
+  📷 ve 🎥 tuşlarını **basılı tutarsan** galeriden seçer.
+- **Çoklu ürün desteği:**
+  - 🎥 **Video:** markette/mutfakta çektiğin videoyu Gemini baştan sona izler, gördüğü
     tüm ürünleri çıkarır (aynı ürün birçok karede görünse bile tek kayıt olur)
-  - 🖼️ **Galeriden:** tek fotoğrafta birden çok ürün olabilir; ayrıca aynı anda 20 fotoğrafa
-    kadar seçip hepsini tek istekte analiz ettirebilirsin
-  - 🎤 **Sesle:** "2 litre süt, 3 adet yumurta ve bir paket ekmek" dersen üçü de ayrı ayrı eklenir
+  - 📷 **Fotoğraf:** tek fotoğrafta birden çok ürün olabilir; galeriden aynı anda
+    20 fotoğrafa kadar seçip hepsini analiz ettirebilirsin
+  - 🎤 **Ses:** "2 litre süt, 3 adet yumurta ve bir paket ekmek" dersen üçü de ayrı ayrı eklenir
   - Bulunanlar önce bir **kontrol listesinde** gösterilir: adını/kategorisini/miktarını/tarihini
     düzeltip istemediklerinin işaretini kaldırabilir, sonra hepsini tek dokunuşla eklersin
   - Video ya da fotoğrafta tarih okunamazsa Gemini o ürüne makul bir raf ömrü tahmini yazar
     (tahmini tarihler `~` ile işaretlenir)
+- **Tarihi olmayan ürünler de ana sayfada görünür** (tarih sıralamalarında en sona düşerler);
+  başlıkta kaç ürünün tarihi eksik olduğu yazar, dokununca tarih ekleyebilirsin
 - **Renk kodlu envanter:** tarihi çok yaklaşan/geçen ürünler 🔴 kırmızı, yaklaşanlar 🟡 sarı,
   sorunsuzlar normal görünür
 - **Kategoriye özel eşikler:** konservede 6 ay kala sarı, süt ürünlerinde 5 gün kala sarı,

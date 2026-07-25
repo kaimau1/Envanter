@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -58,25 +59,59 @@ object FirebaseSync {
         } else attach()
     }
 
-    /** Google hesabıyla giriş; anonim kullanıcı varsa verisini kaybetmeden yükseltir. */
+    /**
+     * Google hesabıyla giriş.
+     *
+     * Anonim kullanıcı varsa önce onu yükseltmeyi (link) dener; böylece bulutta
+     * o cihaza özel biriken veri Google hesabına taşınır. Ancak bu Google hesabı
+     * daha önce (ör. önceki kurulumda) başka bir Firebase kullanıcısına bağlanmışsa
+     * link "This credential is already associated with a different user account"
+     * hatası verir. Bu durumda anonim hesabı bırakıp doğrudan mevcut Google
+     * hesabına giriliyor; cihazdaki ürünler Room'da durduğu için [attach] hepsini
+     * yeni hesaba yükler, yani veri kaybı olmaz — iki taraf birleşir.
+     */
     fun signInWithGoogle(idToken: String) {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         val auth = FirebaseAuth.getInstance()
         val current = auth.currentUser
-        val task = if (current != null && current.isAnonymous) {
-            current.linkWithCredential(credential)
-        } else {
-            auth.signInWithCredential(credential)
+
+        fun succeeded(user: com.google.firebase.auth.FirebaseUser?) {
+            _userEmail.value = user?.email
+            attach()
         }
-        task
-            .addOnSuccessListener {
-                _userEmail.value = it.user?.email
-                attach()
-            }
-            .addOnFailureListener { e ->
-                _status.value = "Google giriş hatası: ${e.message}"
-                Log.w(TAG, "google sign-in failed", e)
-            }
+
+        fun failed(e: Exception) {
+            _status.value = "Google giriş hatası: ${friendlyAuthError(e)}"
+            Log.w(TAG, "google sign-in failed", e)
+        }
+
+        fun signInDirectly() {
+            auth.signInWithCredential(credential)
+                .addOnSuccessListener { succeeded(it.user) }
+                .addOnFailureListener { failed(it) }
+        }
+
+        if (current != null && current.isAnonymous) {
+            current.linkWithCredential(credential)
+                .addOnSuccessListener { succeeded(it.user) }
+                .addOnFailureListener { e ->
+                    if (e is FirebaseAuthUserCollisionException) {
+                        Log.i(TAG, "link collision, signing in to the existing Google account")
+                        signInDirectly()
+                    } else failed(e)
+                }
+        } else signInDirectly()
+    }
+
+    /** Firebase'in İngilizce hata metinlerini anlaşılır Türkçeye çevirir. */
+    private fun friendlyAuthError(e: Exception): String = when {
+        e is FirebaseAuthUserCollisionException ->
+            "Bu Google hesabı başka bir kayda bağlı. Tekrar dene; sorun sürerse çıkış yapıp yeniden gir."
+        e.message?.contains("network", ignoreCase = true) == true ->
+            "İnternet bağlantısı kurulamadı."
+        e.message?.contains("ApiException: 10", ignoreCase = true) == true ->
+            "Uygulama imzası Firebase'e kayıtlı değil (SHA-1 eksik)."
+        else -> e.message ?: "Bilinmeyen hata"
     }
 
     fun signOut(context: Context) {

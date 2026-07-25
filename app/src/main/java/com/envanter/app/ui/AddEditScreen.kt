@@ -1,14 +1,9 @@
 package com.envanter.app.ui
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Bundle
-import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -29,8 +24,6 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -49,7 +42,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,7 +54,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavHostController
 import com.envanter.app.data.CategoryStore
@@ -215,61 +206,21 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
             .onFailure { status = "Ses tanıma bu cihazda kullanılamıyor." }
     }
 
-    // Basılı-tut modu: sistem diyaloğu yerine SpeechRecognizer'ı doğrudan sür,
-    // parmak butondayken dinler, çekilince durur.
+    // Basılı-tut modu: sistem diyaloğu yerine SpeechRecognizer doğrudan sürülür.
+    // Parmak basılı olduğu sürece dinlenir (sessizlikte kesilmez), çekilince analiz edilir.
     val voiceMode by Settings.voiceMode(context).collectAsState(initial = VoiceMode.TAP)
     val holdInteraction = remember { MutableInteractionSource() }
     val isHoldPressed by holdInteraction.collectIsPressedAsState()
-    var recordAudioGranted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        )
-    }
-    val recognizer = remember {
-        SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) { status = "Dinleniyor…" }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onError(error: Int) {
-                    if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_CLIENT) {
-                        status = "Ses tanıma hatası ($error)"
-                    }
-                }
-                override fun onResults(results: Bundle?) {
-                    val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (!spoken.isNullOrBlank()) scope.launch { analyzeSpeech(spoken) }
-                }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-        }
-    }
-    val recordAudioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        recordAudioGranted = granted
-        if (!granted) status = "Basılı tut modu için mikrofon izni gerekiyor."
-    }
-
-    fun startHoldListening() {
-        if (!recordAudioGranted) { recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO); return }
-        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
-        }
-        runCatching { recognizer.startListening(i) }
-    }
-    fun stopHoldListening() {
-        runCatching { recognizer.stopListening() }
-    }
+    val holdVoice = rememberHoldToTalk { text -> scope.launch { analyzeSpeech(text) } }
     LaunchedEffect(isHoldPressed) {
         if (voiceMode == VoiceMode.HOLD) {
-            if (isHoldPressed) startHoldListening() else stopHoldListening()
+            if (isHoldPressed) holdVoice.press() else holdVoice.release()
         }
     }
-    DisposableEffect(Unit) { onDispose { recognizer.destroy() } }
+    // Dinlerken duyulan metni/durumu aynı satırda göster.
+    val holdStatus = if (voiceMode == VoiceMode.HOLD && holdVoice.listening) {
+        holdVoice.heard.ifBlank { holdVoice.message }
+    } else ""
 
     var autoLaunched by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(mode) {
@@ -348,32 +299,21 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                     Text(if (voiceMode == VoiceMode.HOLD) " Basılı Tut, Konuş" else " Sesle Söyle")
                 }
             }
-            // Çok ürünlü kaynaklar toplu ekleme ekranına yönlendirir.
             if (!isEdit) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { nav.navigate("batch?mode=gallery") },
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy
-                    ) {
-                        Icon(Icons.Filled.PhotoLibrary, null)
-                        Text(" Galeriden", maxLines = 1)
-                    }
-                    OutlinedButton(
-                        onClick = { nav.navigate("batch?mode=video") },
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy
-                    ) {
-                        Icon(Icons.Filled.Videocam, null)
-                        Text(" Videodan", maxLines = 1)
-                    }
-                }
+                Text(
+                    "İpucu: fotoğrafta veya söylediğin cümlede birden fazla ürün varsa " +
+                        "hepsi otomatik ayrıştırılıp kontrol listesine düşer.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             if (busy) {
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.padding(end = 8.dp))
                     Text(status)
                 }
+            } else if (holdStatus.isNotBlank()) {
+                Text(holdStatus, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             } else if (status.isNotBlank()) {
                 Text(status, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
             }
