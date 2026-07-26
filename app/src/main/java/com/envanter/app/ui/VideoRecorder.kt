@@ -22,6 +22,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,6 +32,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -90,6 +94,7 @@ fun VideoRecorderOverlay(
     var error by remember { mutableStateOf("") }
     var recording by remember { mutableStateOf<Recording?>(null) }
     var elapsed by remember { mutableStateOf(0) }
+    var paused by remember { mutableStateOf(false) }
     var stopping by remember { mutableStateOf(false) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
 
@@ -161,31 +166,47 @@ fun VideoRecorderOverlay(
         val capture = videoCapture ?: return
         runCatching { output.delete() }
         elapsed = 0
+        paused = false
         val options = FileOutputOptions.Builder(output).build()
         recording = capture.output
             .prepareRecording(context, options)
             // Ses yalnızca izin verildiyse; izin yoksa kayıt sessiz devam etsin, iptal olmasın.
             .apply { if (audioGranted) withAudioEnabled() }
             .start(ContextCompat.getMainExecutor(context)) { event ->
-                if (event is VideoRecordEvent.Finalize) {
-                    recording = null
-                    val file = output.takeIf { it.length() > 0 }
-                    if (event.hasError() && file == null) {
-                        error = "Kayıt tamamlanamadı."
-                        stopping = false
-                    } else {
-                        finish(file)
+                when (event) {
+                    // Duraklat/devam durumunu CameraX'in kendi olayından okuyoruz ki
+                    // buton ile gerçek kayıt durumu ayrışmasın.
+                    is VideoRecordEvent.Pause -> paused = true
+                    is VideoRecordEvent.Resume -> paused = false
+                    is VideoRecordEvent.Finalize -> {
+                        recording = null
+                        paused = false
+                        val file = output.takeIf { it.length() > 0 }
+                        if (event.hasError() && file == null) {
+                            error = "Kayıt tamamlanamadı."
+                            stopping = false
+                        } else {
+                            finish(file)
+                        }
                     }
+                    else -> Unit
                 }
             }
     }
 
-    // Süre sayacı; üst sınıra gelince kayıt kendi kendine biter.
+    /** Duraklatınca aynı dosyaya devam edilir; parçalar tek video olarak birleşir. */
+    fun togglePause() {
+        val current = recording ?: return
+        if (paused) current.resume() else current.pause()
+    }
+
+    // Süre sayacı yalnızca kayıt sürerken ilerler: duraklatılan saniyeler videoya
+    // girmediği için token maliyetine de yansımaz. Üst sınıra gelince kayıt biter.
     LaunchedEffect(recording) {
         if (recording == null) return@LaunchedEffect
         while (recording != null && elapsed < maxSeconds) {
             delay(1000)
-            elapsed += 1
+            if (!paused) elapsed += 1
         }
         if (elapsed >= maxSeconds) stop()
     }
@@ -208,13 +229,18 @@ fun VideoRecorderOverlay(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                if (recording != null) "● ${elapsed} / $maxSeconds sn" else "720p • en fazla $maxSeconds sn",
-                color = Color.White,
+                when {
+                    recording == null -> "720p • en fazla $maxSeconds sn"
+                    paused -> "❚❚ Duraklatıldı — ${elapsed} / $maxSeconds sn"
+                    else -> "● ${elapsed} / $maxSeconds sn"
+                },
+                color = if (paused) Color(0xFFFFC107) else Color.White,
                 fontWeight = FontWeight.Bold
             )
             Text(
                 "Ürünleri tek tek kameraya göster. Okunmayan tarihi veya miktarı " +
-                    "yüksek sesle söyleyebilirsin — Gemini konuştuklarını da dikkate alır.",
+                    "yüksek sesle söyleyebilirsin — Gemini konuştuklarını da dikkate alır. " +
+                    "Araya ara vermek istersen duraklat, sonra kaldığın yerden devam et.",
                 color = Color.White.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.bodySmall
             )
@@ -230,24 +256,55 @@ fun VideoRecorderOverlay(
             }
         }
 
-        Button(
-            onClick = { if (recording != null) stop() else start() },
-            enabled = cameraGranted && videoCapture != null && !stopping,
-            shape = CircleShape,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (recording != null) Color.White else Color(0xFFD32F2F)
-            ),
+        // Ana tuş ortada kalsın diye duraklat tuşunun yeri kayıt yokken de ayrılıyor.
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 40.dp)
-                .size(84.dp)
+                .padding(bottom = 40.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(28.dp)
         ) {
-            Icon(
-                if (recording != null) Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
-                contentDescription = if (recording != null) "Kaydı bitir" else "Kaydı başlat",
-                tint = if (recording != null) Color(0xFFD32F2F) else Color.White,
-                modifier = Modifier.size(36.dp)
-            )
+            Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
+                if (recording != null) {
+                    Button(
+                        onClick = { togglePause() },
+                        enabled = !stopping,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.22f)
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(60.dp)
+                    ) {
+                        Icon(
+                            if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                            contentDescription = if (paused) "Devam et" else "Duraklat",
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+            }
+
+            Button(
+                onClick = { if (recording != null) stop() else start() },
+                enabled = cameraGranted && videoCapture != null && !stopping,
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (recording != null) Color.White else Color(0xFFD32F2F)
+                ),
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.size(84.dp)
+            ) {
+                Icon(
+                    if (recording != null) Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
+                    contentDescription = if (recording != null) "Kaydı bitir" else "Kaydı başlat",
+                    tint = if (recording != null) Color(0xFFD32F2F) else Color.White,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+
+            Box(Modifier.size(60.dp))
         }
 
         if (recording == null && !stopping) {

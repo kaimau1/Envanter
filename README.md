@@ -34,6 +34,9 @@ sade ve pratik bir Android uygulaması.
   kayıt ekranında çekilir. Sistem kamerası çözünürlük seçtirmediği için dosyalar
   1080p/4K çıkıp gereksiz büyüyordu; 720p'de dosya birkaç kat küçülüyor, yükleme
   hızlanıyor ve etiketler hâlâ okunur kalıyor.
+  - **Duraklat / devam et:** dolabın başka rafına geçerken kaydı duraklatıp kaldığın
+    yerden sürdürebilirsin; parçalar tek video olarak birleşir. Duraklatılan saniyeler
+    videoya girmediği için 60 sn sınırından ve token maliyetinden de düşmez.
 - **Video token tüketimi kontrol altında:** Gemini video token'ını videonun **süresinden**
   hesaplar (dosya boyutundan ya da çözünürlükten değil): saniyede 1 kare × 258 token +
   32 token/sn ses ≈ **290 token/sn**. Bu yüzden:
