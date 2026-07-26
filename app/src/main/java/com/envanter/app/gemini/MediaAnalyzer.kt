@@ -86,7 +86,17 @@ object MediaAnalyzer {
         if (key.isBlank()) error("Video analizi için Ayarlar'dan Gemini API anahtarı girmelisin.")
         if (file.length() <= 0) error("Video okunamadı.")
         val model = Settings.geminiModel(context).first()
-        GeminiClient.extractManyFromVideo(key, model, file, mime, onStatus).getOrThrow()
+        // Token maliyeti videonun süresine bağlı; kullanıcının seçtiği kaliteye göre
+        // kare örnekleme sıklığını düşürüp tahmini tüketimi de ekranda gösteriyoruz.
+        val quality = Settings.videoQuality(context).first()
+        val seconds = Media.videoSeconds(file)
+        onStatus("Video: ${Media.humanSize(file.length())} • ${seconds} sn (${quality.label} mod)")
+        val tuning = GeminiClient.VideoTuning(
+            fps = quality.fps,
+            lowRes = quality.lowRes,
+            estimatedTokens = quality.tokensFor(seconds)
+        )
+        GeminiClient.extractManyFromVideo(key, model, file, mime, tuning, onStatus).getOrThrow()
     }
 
     /** Konuşma metninden çoklu ürün çıkarımı; anahtar yoksa cihaz-içi ayrıştırıcı devreye girer. */

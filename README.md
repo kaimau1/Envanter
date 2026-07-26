@@ -26,6 +26,14 @@ sade ve pratik bir Android uygulaması.
     düzeltip istemediklerinin işaretini kaldırabilir, sonra hepsini tek dokunuşla eklersin
   - Video ya da fotoğrafta tarih okunamazsa Gemini o ürüne makul bir raf ömrü tahmini yazar
     (tahmini tarihler `~` ile işaretlenir)
+- **Video token tüketimi kontrol altında:** Gemini video token'ını videonun **süresinden**
+  hesaplar (dosya boyutundan ya da çözünürlükten değil): saniyede 1 kare × 258 token +
+  32 token/sn ses ≈ **290 token/sn**. Bu yüzden:
+  - Kamerayla kayıt **en fazla 60 sn** ve 48 MB ile sınırlı
+  - **Ayarlar → Video Analiz Kalitesi** ile kare örnekleme sıklığı seçilir:
+    Yüksek (1 kare/sn, ~290 token/sn) · **Dengeli** (0,5 kare/sn, ~161 token/sn, varsayılan) ·
+    Tasarruf (0,5 kare/sn + düşük kare çözünürlüğü, ~65 token/sn)
+  - Analiz sırasında videonun süresi ve **tahmini token tüketimi** ekranda gösterilir
 - **Tarihi olmayan ürünler de ana sayfada görünür** (tarih sıralamalarında en sona düşerler);
   başlıkta kaç ürünün tarihi eksik olduğu yazar, dokununca tarih ekleyebilirsin
 - **Renk kodlu envanter:** tarihi çok yaklaşan/geçen ürünler 🔴 kırmızı, yaklaşanlar 🟡 sarı,
@@ -102,7 +110,8 @@ Ayrıca repoyu **Watch → Custom → Releases** yaparsan GitHub da her release'
 - Kotlin + Jetpack Compose (Material 3), tek modül
 - Room (yerel veritabanı, çevrimdışı-öncelikli) + Firestore (senkron)
 - ML Kit cihaz-içi OCR, Android ses tanıma, Gemini REST API
-  (çoklu görsel `inline_data`, video için Files API resumable upload)
+  (çoklu görsel `inline_data`, video için Files API resumable upload,
+  `videoMetadata.fps` + `generationConfig.mediaResolution` ile token ayarı)
 - Android Photo Picker (izin gerektirmez), kamera foto/video çekimi (FileProvider)
 - Glance ana ekran widget'ı, WorkManager bildirimleri
 - İmza: `app/keystore/envanter-release.keystore` (sabit; debug ve release aynı imzayı kullanır)

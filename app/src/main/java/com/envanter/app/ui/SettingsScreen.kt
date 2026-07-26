@@ -47,6 +47,7 @@ import androidx.credentials.exceptions.GetCredentialException
 import com.envanter.app.data.FirebaseSync
 import com.envanter.app.data.Settings
 import com.envanter.app.data.ThemeMode
+import com.envanter.app.data.VideoQuality
 import com.envanter.app.data.VoiceMode
 import com.envanter.app.gemini.GeminiClient
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -60,6 +61,7 @@ fun SettingsScreen() {
 
     val themeMode by Settings.themeMode(context).collectAsState(initial = ThemeMode.SYSTEM)
     val voiceMode by Settings.voiceMode(context).collectAsState(initial = VoiceMode.TAP)
+    val videoQuality by Settings.videoQuality(context).collectAsState(initial = VideoQuality.BALANCED)
     val savedKey by Settings.geminiKey(context).collectAsState(initial = "")
     val savedModel by Settings.geminiModel(context).collectAsState(initial = "gemini-2.0-flash")
     val notifEnabled by Settings.notifEnabled(context).collectAsState(initial = true)
@@ -160,6 +162,37 @@ fun SettingsScreen() {
                         )
                     }
                 }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Video Analiz Kalitesi", fontWeight = FontWeight.Bold)
+                Text(
+                    "Gemini token'ı videonun SÜRESİNDEN hesaplar, dosya boyutundan değil. " +
+                        "Kayıt çözünürlüğünü düşürmek yalnızca yüklemeyi hızlandırır; tasarruf " +
+                        "kısa video çekmekten ve daha seyrek kare örneklemekten gelir.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    VideoQuality.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = videoQuality == mode,
+                            onClick = { scope.launch { Settings.setVideoQuality(context, mode) } },
+                            shape = SegmentedButtonDefaults.itemShape(index, VideoQuality.entries.size),
+                            label = { Text(mode.label) }
+                        )
+                    }
+                }
+                Text(
+                    "${videoQuality.label}: saniyede ${videoQuality.fps} kare" +
+                        (if (videoQuality.lowRes) ", düşük kare çözünürlüğü (etiket okuma zayıflar)" else "") +
+                        " • ~${videoQuality.tokensPerSecond} token/sn " +
+                        "(1 dakikalık video ≈ ${videoQuality.tokensFor(60)} token)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
