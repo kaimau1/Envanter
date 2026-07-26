@@ -328,8 +328,13 @@ object GeminiClient {
             if (tuning.estimatedTokens > 0) "Gemini videodaki ürünleri çıkarıyor… (~${tuning.estimatedTokens} token)"
             else "Gemini videodaki ürünleri çıkarıyor…"
         )
+        // Videonun sesi de bilgi kaynağı: kullanıcı okunmayan tarihi/miktarı sesli söylüyor.
         val source = "Sana bir market alışverişi videosu veriyorum. " +
-            "Video boyunca kameranın önünden geçen tüm ürünleri sırayla incele."
+            "Video boyunca kameranın önünden geçen tüm ürünleri sırayla incele.\n" +
+            "ÖNEMLİ: Videonun SESİNİ de dinle. Kullanıcı kameranın okuyamadığı bilgileri " +
+            "(silik son kullanma tarihi, poşetin içindeki ürün, adet/ağırlık) sesli söylüyor olabilir. " +
+            "Bir ürün hakkında söylenen söz ile görüntü çelişiyorsa SÖYLENENİ esas al. " +
+            "Sesli söylenip görüntüde hiç görünmeyen ürünleri de listeye ekle."
         generateWithMedia(apiKey, model, multiPrompt(source), listOf(part), lowRes = tuning.lowRes)
             .mapCatching { parseProductsJson(it) }
             .getOrThrow()

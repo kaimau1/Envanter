@@ -26,14 +26,24 @@ sade ve pratik bir Android uygulaması.
     düzeltip istemediklerinin işaretini kaldırabilir, sonra hepsini tek dokunuşla eklersin
   - Video ya da fotoğrafta tarih okunamazsa Gemini o ürüne makul bir raf ömrü tahmini yazar
     (tahmini tarihler `~` ile işaretlenir)
+- **Çekerken sesli anlat:** video kaydı sırasında kameranın okuyamadığı bilgiyi
+  (silik son kullanma tarihi, poşetin içindeki ürün, adet/ağırlık) yüksek sesle
+  söyleyebilirsin. Gemini videonun sesini de dinler ve söylenen bilgiyi görüntüye
+  tercih eder; sadece sesli sayılan ürünler de listeye girer.
+- **Uygulama içi 720p kayıt:** video artık sistem kamerası yerine uygulamanın kendi
+  kayıt ekranında çekilir. Sistem kamerası çözünürlük seçtirmediği için dosyalar
+  1080p/4K çıkıp gereksiz büyüyordu; 720p'de dosya birkaç kat küçülüyor, yükleme
+  hızlanıyor ve etiketler hâlâ okunur kalıyor.
 - **Video token tüketimi kontrol altında:** Gemini video token'ını videonun **süresinden**
   hesaplar (dosya boyutundan ya da çözünürlükten değil): saniyede 1 kare × 258 token +
   32 token/sn ses ≈ **290 token/sn**. Bu yüzden:
-  - Kamerayla kayıt **en fazla 60 sn** ve 48 MB ile sınırlı
+  - Kayıt **en fazla 60 sn**
   - **Ayarlar → Video Analiz Kalitesi** ile kare örnekleme sıklığı seçilir:
     Yüksek (1 kare/sn, ~290 token/sn) · **Dengeli** (0,5 kare/sn, ~161 token/sn, varsayılan) ·
     Tasarruf (0,5 kare/sn + düşük kare çözünürlüğü, ~65 token/sn)
   - Analiz sırasında videonun süresi ve **tahmini token tüketimi** ekranda gösterilir
+  - Not: 720p'ye inmek dosyayı küçültür ama token'ı azaltmaz — Gemini kareleri
+    zaten kendi içinde küçültüyor. Token'ı azaltan şey kısa video ve seyrek kare örnekleme.
 - **Tarihi olmayan ürünler de ana sayfada görünür** (tarih sıralamalarında en sona düşerler);
   başlıkta kaç ürünün tarihi eksik olduğu yazar, dokununca tarih ekleyebilirsin
 - **Renk kodlu envanter:** tarihi çok yaklaşan/geçen ürünler 🔴 kırmızı, yaklaşanlar 🟡 sarı,
@@ -112,7 +122,8 @@ Ayrıca repoyu **Watch → Custom → Releases** yaparsan GitHub da her release'
 - ML Kit cihaz-içi OCR, Android ses tanıma, Gemini REST API
   (çoklu görsel `inline_data`, video için Files API resumable upload,
   `videoMetadata.fps` + `generationConfig.mediaResolution` ile token ayarı)
-- Android Photo Picker (izin gerektirmez), kamera foto/video çekimi (FileProvider)
+- Android Photo Picker (izin gerektirmez), kamera foto çekimi (FileProvider),
+  CameraX ile uygulama içi 720p video kaydı (ses açık)
 - Glance ana ekran widget'ı, WorkManager bildirimleri
 - İmza: `app/keystore/envanter-release.keystore` (sabit; debug ve release aynı imzayı kullanır)
 

@@ -3,7 +3,6 @@ package com.envanter.app.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.MediaStore
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -77,22 +76,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
-/** Kayıt için üst sınırlar: uzun video hem devasa dosya hem yüksek token demek. */
+/** Kayıt üst sınırı: uzun video hem devasa dosya hem yüksek token demek. */
 private const val MAX_VIDEO_SECONDS = 60
-private const val MAX_VIDEO_BYTES = 48L * 1024 * 1024
-
-/**
- * Kamera uygulamasına süre ve boyut sınırı geçen kayıt sözleşmesi.
- * Çözünürlüğü kasten düşürmüyoruz: Gemini kareleri zaten kendi içinde küçültüyor,
- * düşük çözünürlükte çekim ise paket üzerindeki yazıyı okunmaz hale getiriyor.
- * Token maliyetini belirleyen şey videonun SÜRESİ, o yüzden asıl sınır orada.
- */
-private class CaptureVideoLimited : ActivityResultContracts.CaptureVideo() {
-    override fun createIntent(context: Context, input: Uri): Intent =
-        super.createIntent(context, input)
-            .putExtra(MediaStore.EXTRA_DURATION_LIMIT, MAX_VIDEO_SECONDS)
-            .putExtra(MediaStore.EXTRA_SIZE_LIMIT, MAX_VIDEO_BYTES)
-}
 
 private fun cacheUri(context: Context, dir: String, name: String): Pair<Uri, File> {
     val folder = File(context.cacheDir, dir).apply { mkdirs() }
@@ -146,17 +131,6 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
             }
         }
     }
-    val captureVideo = rememberLauncherForActivityResult(remember { CaptureVideoLimited() }) { ok ->
-        // Bazı kamera uygulamaları kayıt başarılı olsa da false döndürüyor; dosyaya bak.
-        val recorded = videoTarget.second.length() > 0
-        if (ok || recorded) scope.launch {
-            if (!recorded) {
-                status = "Video kaydedilemedi."
-            } else runAnalysis("video") { onStatus ->
-                MediaAnalyzer.fromVideo(context, videoTarget.second, "video/mp4", onStatus)
-            }
-        }
-    }
     val pickPhotos = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(20)
     ) { uris ->
@@ -182,10 +156,12 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
         }
     }
 
-    // Kayıt öncesi eski dosyayı sil: kullanıcı vazgeçerse bir önceki video analiz edilmesin.
+    // Kayıt uygulama içi 720p ekranda yapılır; overlay açıkken ekranın geri kalanı gizlenir.
+    var recordingVideo by remember { mutableStateOf(false) }
+
     fun startVideoCapture() {
         runCatching { videoTarget.second.delete() }
-        captureVideo.launch(videoTarget.first)
+        recordingVideo = true
     }
 
     fun startPhotoCapture() {
@@ -221,6 +197,19 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
             "photo" -> startPhotoCapture()
             "voice" -> launchSpeech()
         }
+    }
+
+    if (recordingVideo) {
+        VideoRecorderOverlay(output = videoTarget.second, maxSeconds = MAX_VIDEO_SECONDS) { file ->
+            recordingVideo = false
+            if (file == null) status = "Kayıt iptal edildi."
+            else scope.launch {
+                runAnalysis("video") { onStatus ->
+                    MediaAnalyzer.fromVideo(context, file, "video/mp4", onStatus)
+                }
+            }
+        }
+        return
     }
 
     val selectedCount = drafts.count { it.selected && it.name.isNotBlank() }
@@ -305,7 +294,8 @@ fun BatchAddScreen(nav: NavHostController, mode: String = "") {
                     Text(
                         "Bir videoda, fotoğrafta veya cümlede kaç ürün varsa hepsi birden eklenir • " +
                             "galeriden seçmek için 📷 veya 🎥 tuşunu basılı tut • " +
-                            "video en fazla $MAX_VIDEO_SECONDS sn: token tüketimi videonun süresiyle artar",
+                            "video 720p ve en fazla $MAX_VIDEO_SECONDS sn • " +
+                            "çekerken okunmayan tarihi sesli söyleyebilirsin",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp)
