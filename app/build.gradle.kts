@@ -66,6 +66,20 @@ dependencies {
     // Fotoğraf yönünü (EXIF) düzeltmek için — yan yatmış etiketler Gemini'de okunmuyordu
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 
+    // CameraX: uygulama içi 720p video kaydı. Sistem kamerası çözünürlük seçtirmediği
+    // için (yalnızca "düşük/yüksek") dosyalar 1080p/4K çıkıyor ve gereksiz büyüyordu.
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-video:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+    // CameraX'in ListenableFuture'ını coroutine ile beklemek için (await)
+    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+    // ListenableFuture çalışma zamanında ML Kit'in guava'sından geliyor ama derleme
+    // sınıf yolunda boş "avoid-conflict" sürümüyle geldiği için görünmüyor; sadece
+    // derleme için gerçek guava'yı ekliyoruz (APK'ya bir şey eklenmiyor).
+    compileOnly("com.google.guava:guava:32.1.3-android")
+
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

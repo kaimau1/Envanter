@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
@@ -58,6 +59,22 @@ object Media {
         } ?: return@runCatching null
         out.takeIf { it.length() > 0 }
     }.getOrNull()
+
+    /**
+     * Videonun saniye cinsinden süresi. Gemini token maliyeti süreyle doğru orantılı
+     * olduğu için kullanıcıya tahmini tüketimi göstermekte kullanılır; okunamazsa 0.
+     */
+    fun videoSeconds(file: File): Int = runCatching {
+        // MediaMetadataRetriever ancak API 29'dan beri AutoCloseable; minSdk 26 için elle release.
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(file.path)
+            val ms = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            ((ms + 999) / 1000).toInt()
+        } finally {
+            r.release()
+        }
+    }.getOrDefault(0)
 
     fun mimeOf(context: Context, uri: Uri, fallback: String = "video/mp4"): String =
         context.contentResolver.getType(uri)?.takeIf { it.isNotBlank() } ?: fallback

@@ -49,8 +49,29 @@ object GeminiClient {
         .build()
     private val JSON_MT = "application/json; charset=utf-8".toMediaType()
 
-    /** İstek gövdesine eklenecek görsel/video parçası: ya inline base64 ya da yüklenmiş dosya. */
-    private data class MediaPart(val mime: String, val base64: String? = null, val fileUri: String? = null)
+    /**
+     * İstek gövdesine eklenecek görsel/video parçası: ya inline base64 ya da yüklenmiş dosya.
+     * [fps] yalnızca videoda anlamlı: Gemini'nin saniyede kaç kare örnekleyeceğini belirler.
+     */
+    private data class MediaPart(
+        val mime: String,
+        val base64: String? = null,
+        val fileUri: String? = null,
+        val fps: Double? = null
+    )
+
+    /**
+     * Video analizinin token maliyetini belirleyen ayarlar.
+     * [estimatedTokens] yalnızca kullanıcıya gösterilen kaba tahmindir.
+     */
+    data class VideoTuning(
+        val fps: Double = 1.0,
+        val lowRes: Boolean = false,
+        val estimatedTokens: Int = 0
+    )
+
+    /** Gemini'nin HTTP hatası; 400'de "ayarsız" isteğe geri düşebilmek için kodu taşır. */
+    private class ApiException(val code: Int, message: String) : IllegalStateException(message)
 
     /** generateContent destekleyen modellerin adlarını döndürür. */
     suspend fun listModels(apiKey: String): Result<List<String>> = withContext(Dispatchers.IO) {
@@ -84,48 +105,72 @@ object GeminiClient {
         apiKey: String,
         model: String,
         prompt: String,
-        media: List<MediaPart>
+        media: List<MediaPart>,
+        lowRes: Boolean = false
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val parts = JSONArray()
-            parts.put(JSONObject().put("text", prompt))
-            media.forEach { m ->
-                when {
-                    m.base64 != null -> parts.put(
-                        JSONObject().put(
-                            "inline_data",
-                            JSONObject().put("mime_type", m.mime).put("data", m.base64)
-                        )
-                    )
-                    m.fileUri != null -> parts.put(
-                        JSONObject().put(
-                            "file_data",
-                            JSONObject().put("mime_type", m.mime).put("file_uri", m.fileUri)
-                        )
-                    )
-                }
+            // fps / mediaResolution her modelde (ör. eski flash sürümlerinde) tanınmıyor.
+            // Tanınmazsa API 400 döner; bu durumda isteği ayarsız haliyle bir kez tekrarlarız.
+            val tunable = lowRes || media.any { it.fps != null }
+            try {
+                callGenerate(apiKey, model, prompt, media, lowRes, tuned = tunable)
+            } catch (e: ApiException) {
+                if (tunable && e.code == 400) callGenerate(apiKey, model, prompt, media, lowRes, tuned = false)
+                else throw e
             }
-            val payload = JSONObject().put(
-                "contents",
-                JSONArray().put(JSONObject().put("parts", parts))
-            )
-            val req = Request.Builder()
-                .url("$BASE/models/$model:generateContent?key=$apiKey")
-                .post(payload.toString().toRequestBody(JSON_MT))
-                .build()
-            http.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) error(apiError(body, resp.code))
-                val candidate = JSONObject(body).optJSONArray("candidates")?.optJSONObject(0)
-                    ?: error("Model yanıt vermedi")
-                val textParts = candidate.optJSONObject("content")?.optJSONArray("parts")
-                    ?: error("Model boş yanıt döndü")
-                // Düşünme adımı olan modeller birden fazla parça döndürebiliyor: hepsini birleştir.
-                (0 until textParts.length())
-                    .mapNotNull { textParts.optJSONObject(it)?.optString("text")?.takeIf { t -> t.isNotBlank() } }
-                    .joinToString("\n")
-                    .ifBlank { error("Model boş yanıt döndü") }
+        }
+    }
+
+    private fun callGenerate(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        media: List<MediaPart>,
+        lowRes: Boolean,
+        tuned: Boolean
+    ): String {
+        val parts = JSONArray()
+        parts.put(JSONObject().put("text", prompt))
+        media.forEach { m ->
+            val part = when {
+                m.base64 != null -> JSONObject().put(
+                    "inline_data",
+                    JSONObject().put("mime_type", m.mime).put("data", m.base64)
+                )
+                m.fileUri != null -> JSONObject().put(
+                    "file_data",
+                    JSONObject().put("mime_type", m.mime).put("file_uri", m.fileUri)
+                )
+                else -> return@forEach
             }
+            // Kare örnekleme sıklığı: 1.0 varsayılan, 0.5 -> yarısı kadar kare -> yarısı kadar token.
+            if (tuned && m.fps != null) part.put("video_metadata", JSONObject().put("fps", m.fps))
+            parts.put(part)
+        }
+        val payload = JSONObject().put(
+            "contents",
+            JSONArray().put(JSONObject().put("parts", parts))
+        )
+        // Düşük çözünürlük: kare başına 258 yerine 66 token.
+        if (tuned && lowRes) {
+            payload.put("generationConfig", JSONObject().put("mediaResolution", "MEDIA_RESOLUTION_LOW"))
+        }
+        val req = Request.Builder()
+            .url("$BASE/models/$model:generateContent?key=$apiKey")
+            .post(payload.toString().toRequestBody(JSON_MT))
+            .build()
+        return http.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ApiException(resp.code, apiError(body, resp.code))
+            val candidate = JSONObject(body).optJSONArray("candidates")?.optJSONObject(0)
+                ?: error("Model yanıt vermedi")
+            val textParts = candidate.optJSONObject("content")?.optJSONArray("parts")
+                ?: error("Model boş yanıt döndü")
+            // Düşünme adımı olan modeller birden fazla parça döndürebiliyor: hepsini birleştir.
+            (0 until textParts.length())
+                .mapNotNull { textParts.optJSONObject(it)?.optString("text")?.takeIf { t -> t.isNotBlank() } }
+                .joinToString("\n")
+                .ifBlank { error("Model boş yanıt döndü") }
         }
     }
 
@@ -261,26 +306,36 @@ object GeminiClient {
 
     /**
      * Videoyu analiz eder. 14 MB altındaki videolar doğrudan, büyükler Files API ile yüklenerek
-     * gönderilir. [onStatus] yükleme/işleme durumunu ekrana yansıtmak içindir.
+     * gönderilir. [tuning] kare örnekleme sıklığını ve kare çözünürlüğünü — yani token
+     * maliyetini — belirler. [onStatus] yükleme/işleme durumunu ekrana yansıtmak içindir.
      */
     suspend fun extractManyFromVideo(
         apiKey: String,
         model: String,
         file: File,
         mime: String,
+        tuning: VideoTuning = VideoTuning(),
         onStatus: (String) -> Unit = {}
     ): Result<List<ParsedProduct>> = runCatching {
         val part = if (file.length() <= INLINE_VIDEO_LIMIT) {
             onStatus("Video hazırlanıyor (${humanSize(file.length())})…")
             val b64 = withContext(Dispatchers.IO) { Base64.encodeToString(file.readBytes(), Base64.NO_WRAP) }
-            MediaPart(mime, base64 = b64)
+            MediaPart(mime, base64 = b64, fps = tuning.fps)
         } else {
-            MediaPart(mime, fileUri = uploadFile(apiKey, file, mime, onStatus))
+            MediaPart(mime, fileUri = uploadFile(apiKey, file, mime, onStatus), fps = tuning.fps)
         }
-        onStatus("Gemini videodaki ürünleri çıkarıyor…")
+        onStatus(
+            if (tuning.estimatedTokens > 0) "Gemini videodaki ürünleri çıkarıyor… (~${tuning.estimatedTokens} token)"
+            else "Gemini videodaki ürünleri çıkarıyor…"
+        )
+        // Videonun sesi de bilgi kaynağı: kullanıcı okunmayan tarihi/miktarı sesli söylüyor.
         val source = "Sana bir market alışverişi videosu veriyorum. " +
-            "Video boyunca kameranın önünden geçen tüm ürünleri sırayla incele."
-        generateWithMedia(apiKey, model, multiPrompt(source), listOf(part))
+            "Video boyunca kameranın önünden geçen tüm ürünleri sırayla incele.\n" +
+            "ÖNEMLİ: Videonun SESİNİ de dinle. Kullanıcı kameranın okuyamadığı bilgileri " +
+            "(silik son kullanma tarihi, poşetin içindeki ürün, adet/ağırlık) sesli söylüyor olabilir. " +
+            "Bir ürün hakkında söylenen söz ile görüntü çelişiyorsa SÖYLENENİ esas al. " +
+            "Sesli söylenip görüntüde hiç görünmeyen ürünleri de listeye ekle."
+        generateWithMedia(apiKey, model, multiPrompt(source), listOf(part), lowRes = tuning.lowRes)
             .mapCatching { parseProductsJson(it) }
             .getOrThrow()
     }
