@@ -12,6 +12,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.envanter.app.MainActivity
 import com.envanter.app.R
+import com.envanter.app.data.HomeStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import com.envanter.app.data.Urgency
@@ -27,7 +28,8 @@ class ExpiryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             != PackageManager.PERMISSION_GRANTED && android.os.Build.VERSION.SDK_INT >= 33
         ) return Result.success()
 
-        val urgent = Repository.items().filter { it.urgency == Urgency.RED || it.urgency == Urgency.EXPIRED }
+        // Bildirim ev-üstüdür: yazlıktaki ürünün tarihi geçerken uyarı gelmemesi olmaz.
+        val urgent = Repository.allItems().filter { it.urgency == Urgency.RED || it.urgency == Urgency.EXPIRED }
         if (urgent.isEmpty()) return Result.success()
 
         val expired = urgent.count { it.urgency == Urgency.EXPIRED }
@@ -36,7 +38,12 @@ class ExpiryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val text = buildString {
             if (expired > 0) append("$expired ürünün tarihi geçti. ")
             if (red > 0) append("$red ürünün tarihi çok yakın. ")
-            append(urgent.take(3).joinToString(", ") { it.name })
+            val multiHome = HomeStore.all.size > 1
+            append(urgent.take(3).joinToString(", ") { item ->
+                // Birden fazla ev varsa hangi evde olduğu da yazsın.
+                val home = if (multiHome) HomeStore.byId(HomeStore.homeOf(item))?.emoji.orEmpty() else ""
+                if (home.isBlank()) item.name else "$home ${item.name}"
+            })
             if (urgent.size > 3) append("…")
         }
 

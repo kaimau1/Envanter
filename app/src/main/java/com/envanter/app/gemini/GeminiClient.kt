@@ -25,7 +25,19 @@ data class InventoryReview(
     val itemCategories: Map<String, String>,
     val shelfLife: List<ShelfLife> = emptyList(),
     /** Ürün id -> tahmini raf ömrü (gün). Tarihi boş ürünler için Gemini'nin doğrudan cevabı. */
-    val itemDays: Map<String, Int> = emptyMap()
+    val itemDays: Map<String, Int> = emptyMap(),
+    /** Ürün id -> paketi açıldıktan sonra kaç gün içinde tüketilmeli. */
+    val itemOpenedDays: Map<String, Int> = emptyMap()
+)
+
+/**
+ * Ses kaydının Gemini tarafından anlaşılmış hâli: hem konuşmanın dökümü
+ * hem de içinden çıkarılan ürünler. Döküm yalnızca kullanıcıya "ne duydum"
+ * diye göstermek (ve hata mesajı yazmak) için gerekir.
+ */
+data class VoiceUnderstanding(
+    val transcript: String,
+    val products: List<ParsedProduct>
 )
 
 /**
@@ -265,8 +277,12 @@ object GeminiClient {
 
     // ---- Çoklu ürün çıkarımı (video / çoklu fotoğraf / çok ürünlü konuşma) ----
 
-    /** Birden fazla ürün bekleyen ortak yönerge. [source] kaynağı tarif eder. */
-    private fun multiPrompt(source: String): String {
+    /**
+     * Birden fazla ürün bekleyen ortak yönerge. [source] kaynağı tarif eder.
+     * [withTranscript] ses kaydı için: Gemini duyduğu cümleyi de JSON'a yazar,
+     * böylece kullanıcıya "şunu duydum" diyebiliriz.
+     */
+    private fun multiPrompt(source: String, withTranscript: Boolean = false): String {
         val cats = CategoryStore.all.joinToString(", ") { it.id }
         return buildString {
             append("Bir mutfak envanteri asistanısın. $source\n")
@@ -280,8 +296,12 @@ object GeminiClient {
             append("Kategori tam olarak şunlardan biri olmalı: $cats\n")
             append("Birim şunlardan biri olsun: adet, kg, g, L, ml, paket, kutu, şişe\n")
             append("Gıda olmayan nesneleri (poşet, masa, telefon, insan vb.) listeleme.\n")
+            if (withTranscript) {
+                append("Ayrıca duyduğun konuşmanın tam dökümünü \"transcript\" alanına yaz.\n")
+            }
             append("SADECE şu JSON'u döndür, başka hiçbir metin/açıklama yazma:\n")
-            append("""{"products":[{"name":"...","quantity":1,"unit":"adet","expiry":"yyyy-MM-dd","category":"...","days":7}]}""")
+            if (withTranscript) append("""{"transcript":"duyduğun cümle",""") else append("{")
+            append(""""products":[{"name":"...","quantity":1,"unit":"adet","expiry":"yyyy-MM-dd","category":"...","days":7}]}""")
             append("\nHiç ürün bulamazsan {\"products\":[]} döndür. Bugünün tarihi: ")
             append(LocalDate.now())
         }
@@ -340,6 +360,61 @@ object GeminiClient {
             .getOrThrow()
     }
 
+    /**
+     * Ses kaydını doğrudan Gemini'ye dinletir: cihazın ses tanıyıcısı devreye
+     * girmediği için konuşma sessizlikte kesilmez, arka plan gürültüsü ve yarım
+     * cümleler de daha iyi anlaşılır. Kayıt kısa olduğu için (en fazla birkaç
+     * dakika) doğrudan inline gönderilir; ses ~32 token/sn tüketir.
+     */
+    suspend fun extractManyFromAudio(
+        apiKey: String,
+        model: String,
+        bytes: ByteArray,
+        mime: String
+    ): Result<VoiceUnderstanding> {
+        if (bytes.isEmpty()) return Result.success(VoiceUnderstanding("", emptyList()))
+        val b64 = withContext(Dispatchers.IO) { Base64.encodeToString(bytes, Base64.NO_WRAP) }
+        val source = "Sana bir ses kaydı veriyorum: kullanıcı aldığı ürünleri sesli olarak sayıyor. " +
+            "Kaydı dinle ve söylenen her ürünü ayrı kayıt yap. " +
+            "Kullanıcı bir ürün için tarih söylediyse onu kullan, söylemediyse \"days\" tahmini ver. " +
+            "Kaydın başında/sonunda sessizlik ya da anlaşılmayan sesler olabilir, bunları yok say."
+        return generateWithMedia(
+            apiKey, model, multiPrompt(source, withTranscript = true),
+            listOf(MediaPart(mime, base64 = b64))
+        ).mapCatching { raw ->
+            VoiceUnderstanding(transcript = parseTranscript(raw), products = parseProductsJson(raw))
+        }
+    }
+
+    /**
+     * Paketi açılmış bir ürünün kaç gün içinde tüketilmesi gerektiğini sorar.
+     * Cevap yalnızca gün sayısıdır; kısa ve ucuz bir istektir.
+     */
+    suspend fun openedShelfLife(
+        apiKey: String,
+        model: String,
+        name: String,
+        categoryLabel: String
+    ): Result<Int> {
+        val prompt = buildString {
+            append("Bir gıda güvenliği asistanısın. Ürün: \"$name\" (kategori: $categoryLabel).\n")
+            append("Bu ürünün AMBALAJI/KAPAĞI AÇILDIKTAN sonra, uygun koşulda (gerekiyorsa buzdolabında) ")
+            append("saklanırsa kaç gün içinde tüketilmesi gerekir?\n")
+            append("Kapalıyken üzerindeki son kullanma tarihi değil, AÇILDIKTAN SONRAKİ süreyi ver.\n")
+            append("SADECE şu JSON'u döndür: {\"openedDays\":5}\n")
+            append("Bilemiyorsan makul bir tahmin yaz, boş bırakma.")
+        }
+        return generate(apiKey, model, prompt).mapCatching { raw ->
+            val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            val start = cleaned.indexOf('{')
+            val end = cleaned.lastIndexOf('}')
+            require(start >= 0 && end > start) { "JSON bulunamadı" }
+            val days = JSONObject(cleaned.substring(start, end + 1)).optInt("openedDays", -1)
+            require(days > 0) { "Gün bilgisi alınamadı" }
+            days.coerceIn(1, 1825)
+        }
+    }
+
     /** Tek cümlede sayılan birden fazla ürünü ayrıştırır. */
     suspend fun extractManyFromText(
         apiKey: String,
@@ -353,6 +428,15 @@ object GeminiClient {
         return generate(apiKey, model, multiPrompt(source))
             .mapCatching { parseProductsJson(it) }
     }
+
+    /** Ses yanıtındaki konuşma dökümü; yoksa boş metin. */
+    private fun parseTranscript(raw: String): String = runCatching {
+        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val start = cleaned.indexOf('{')
+        val end = cleaned.lastIndexOf('}')
+        if (start < 0 || end <= start) return ""
+        JSONObject(cleaned.substring(start, end + 1)).optString("transcript").trim()
+    }.getOrDefault("")
 
     private fun parseProductsJson(raw: String): List<ParsedProduct> {
         val cleaned = raw.trim()
@@ -389,14 +473,19 @@ object GeminiClient {
         currentCategories: List<CategoryDef>,
         items: List<Pair<String, String>>,
         currentShelfLife: List<ShelfLife> = emptyList(),
-        datelessNames: List<String> = emptyList()
+        datelessNames: List<String> = emptyList(),
+        /** Paketi açılmış olarak işaretlenmiş ürünler: (id, ad). */
+        openedItems: List<Pair<String, String>> = emptyList()
     ): Result<InventoryReview> {
         if (items.isEmpty()) return Result.success(InventoryReview(emptyList(), emptyMap()))
         val catLines = currentCategories.joinToString("\n") {
             "${it.id} | ${it.label} | kırmızı<=${it.redDays}gün | sarı<=${it.yellowDays}gün"
         }
         val itemLines = items.joinToString("\n") { "${it.first} | ${it.second}" }
-        val shelfLines = currentShelfLife.joinToString("\n") { "${it.keyword} | ${it.days} gün" }
+        val shelfLines = currentShelfLife.joinToString("\n") {
+            "${it.keyword} | ${it.days} gün" + if (it.openedDays > 0) " | açılınca ${it.openedDays} gün" else ""
+        }
+        val openedLines = openedItems.joinToString("\n") { "${it.first} | ${it.second}" }
         val prompt = buildString {
             append("Bir mutfak envanteri asistanısın. Aşağıda mevcut kategoriler ve ürünler var.\n\n")
             append("MEVCUT KATEGORİLER (id | ad | kırmızı eşiği | sarı eşiği):\n$catLines\n\n")
@@ -406,6 +495,9 @@ object GeminiClient {
             append("\n\n")
             append("TARİHİ BOŞ ÜRÜNLER (envanterde son kullanma tarihi girilmemiş olanlar):\n")
             append(if (datelessNames.isEmpty()) "(yok)" else datelessNames.joinToString("\n"))
+            append("\n\n")
+            append("PAKETİ AÇILMIŞ ÜRÜNLER (id | ad):\n")
+            append(if (openedLines.isBlank()) "(yok)" else openedLines)
             append("\n\n")
             append("Görevin:\n")
             append("1) Her ürünü en doğru kategoriye ata.\n")
@@ -421,11 +513,16 @@ object GeminiClient {
             append("5) Aynı tahminleri ileride tekrar kullanabilmek için shelfLife'a da ekle; ")
             append("keyword olarak ürünün markasız, sade adını kullan ")
             append("(ör. \"Sütaş beyaz peynir 500g\" -> \"beyaz peynir\"). ")
-            append("Mevcut bir raf ömrü yanlışsa düzelt.\n\n")
+            append("Mevcut bir raf ömrü yanlışsa düzelt.\n")
+            append("6) PAKETİ AÇILMIŞ ÜRÜNLER listesindeki HER ürün için items kaydına \"openedDays\" ekle: ")
+            append("ambalaj açıldıktan sonra kaç gün içinde tüketilmeli (ör. açılmış süt 3, ")
+            append("açılmış salça 20, açılmış konserve 3, açılmış ketçap 60). ")
+            append("Bu, paketin üzerindeki tarihten bağımsızdır ve genelde çok daha kısadır.\n")
+            append("7) Bu bilgiyi shelfLife kayıtlarına da \"openedDays\" olarak ekleyebilirsin.\n\n")
             append("SADECE şu JSON'u döndür, başka metin yazma:\n")
             append("""{"categories":[{"id":"KISA_BUYUK_HARF_ID","label":"Ad","emoji":"🍎","redDays":3,"yellowDays":7,"keywords":["kelime1","kelime2"]}],""")
-            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID","days":10}],""")
-            append(""""shelfLife":[{"keyword":"domates","days":7}]}""")
+            append(""""items":[{"id":"URUN_ID","category":"KATEGORI_ID","days":10,"openedDays":5}],""")
+            append(""""shelfLife":[{"keyword":"domates","days":7,"openedDays":3}]}""")
             append("\nNot: categories ve shelfLife listelerine sadece YENİ veya DEĞİŞTİRDİĞİN kayıtları koy. ")
             append("id'ler büyük harf ve alt çizgili olsun (ör. BEBEK_MAMASI). Bugünün tarihi: ")
             append(LocalDate.now())
@@ -474,11 +571,13 @@ object GeminiClient {
 
             val map = mutableMapOf<String, String>()
             val days = mutableMapOf<String, Int>()
+            val openedDays = mutableMapOf<String, Int>()
             root.optJSONArray("items")?.let { arr ->
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
                     val id = o.optString("id").takeIf { it.isNotBlank() } ?: continue
                     o.optInt("days", -1).takeIf { it > 0 }?.let { days[id] = it.coerceIn(1, 3650) }
+                    o.optInt("openedDays", -1).takeIf { it > 0 }?.let { openedDays[id] = it.coerceIn(1, 1825) }
                     val catRaw = o.optString("category").takeIf { it.isNotBlank() } ?: continue
                     val catId = catRaw.uppercase().replace(Regex("[^A-Z0-9]+"), "_").trim('_')
                     map[id] = catId
@@ -492,11 +591,16 @@ object GeminiClient {
                     val keyword = o.optString("keyword").trim().lowercase()
                     if (keyword.isBlank()) continue
                     val days = o.optInt("days", -1)
-                    if (days <= 0) continue
-                    shelfLife += ShelfLife(keyword, days.coerceIn(1, 3650))
+                    val opened = o.optInt("openedDays", -1)
+                    if (days <= 0 && opened <= 0) continue
+                    shelfLife += ShelfLife(
+                        keyword = keyword,
+                        days = if (days > 0) days.coerceIn(1, 3650) else 0,
+                        openedDays = if (opened > 0) opened.coerceIn(1, 1825) else 0
+                    )
                 }
             }
-            InventoryReview(cats, map, shelfLife, days)
+            InventoryReview(cats, map, shelfLife, days, openedDays)
         }
     }
 

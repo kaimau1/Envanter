@@ -53,6 +53,7 @@ object Settings {
     private val THEME_MODE = stringPreferencesKey("theme_mode")
     private val VOICE_MODE = stringPreferencesKey("voice_mode")
     private val VIDEO_QUALITY = stringPreferencesKey("video_quality")
+    private val ACTIVE_HOME = stringPreferencesKey("active_home")
 
     fun geminiKey(c: Context): Flow<String> = c.dataStore.data.map { it[GEMINI_KEY] ?: "" }
     fun geminiModel(c: Context): Flow<String> = c.dataStore.data.map { it[GEMINI_MODEL] ?: "gemini-2.0-flash" }
@@ -69,6 +70,11 @@ object Settings {
         runCatching { VideoQuality.valueOf(p[VIDEO_QUALITY] ?: VideoQuality.BALANCED.name) }
             .getOrDefault(VideoQuality.BALANCED)
     }
+
+    /** En son bakılan ev; uygulama kapanıp açılınca aynı evle devam eder. */
+    fun activeHome(c: Context): Flow<String> = c.dataStore.data.map { it[ACTIVE_HOME] ?: "" }
+
+    suspend fun setActiveHome(c: Context, v: String) = c.dataStore.edit { it[ACTIVE_HOME] = v }
 
     suspend fun setGeminiKey(c: Context, v: String) = c.dataStore.edit { it[GEMINI_KEY] = v }
     suspend fun setGeminiModel(c: Context, v: String) = c.dataStore.edit { it[GEMINI_MODEL] = v }

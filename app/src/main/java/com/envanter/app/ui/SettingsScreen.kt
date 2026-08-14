@@ -40,11 +40,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
 import com.envanter.app.data.FirebaseSync
+import com.envanter.app.data.HomeStore
 import com.envanter.app.data.Settings
 import com.envanter.app.data.ThemeMode
 import com.envanter.app.data.VideoQuality
@@ -55,9 +57,11 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(nav: NavHostController? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val homes by HomeStore.flow.collectAsState()
+    val activeHomeId by HomeStore.activeId.collectAsState()
 
     val themeMode by Settings.themeMode(context).collectAsState(initial = ThemeMode.SYSTEM)
     val voiceMode by Settings.voiceMode(context).collectAsState(initial = VoiceMode.TAP)
@@ -129,6 +133,22 @@ fun SettingsScreen() {
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Evler", fontWeight = FontWeight.Bold)
+                Text(
+                    "Her evin kendi envanteri var. Şu an açık ev: " +
+                        (homes.firstOrNull { it.id == activeHomeId } ?: HomeStore.DEFAULT).title +
+                        " • toplam ${homes.size} ev.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(onClick = { nav?.navigate("homes") }, enabled = nav != null) {
+                    Text("Evleri Yönet")
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Tema", fontWeight = FontWeight.Bold)
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     ThemeMode.entries.forEachIndexed { index, mode ->
@@ -148,7 +168,9 @@ fun SettingsScreen() {
                 Text("Sesle Ekleme Modu", fontWeight = FontWeight.Bold)
                 Text(
                     "Dokun: butona bas, konuş, sistem sessizlikte otomatik durur. " +
-                        "Basılı Tut: parmağın buton üzerindeyken dinler, çekince durur.",
+                        "Basılı Tut: parmağın buton üzerindeyken dinler, çekince durur. " +
+                        "Gemini anahtarı girildiyse basılı tutarken ses doğrudan kaydedilip " +
+                        "Gemini'ye dinletilir; böylece konuşma sessizlikte kesilmez.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

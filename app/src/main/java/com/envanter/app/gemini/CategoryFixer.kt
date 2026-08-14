@@ -14,9 +14,12 @@ data class FixSummary(
     val categoriesAdded: Int,
     val categoriesEdited: Int,
     val shelfLifeUpdated: Int = 0,
-    val datesFilled: Int = 0
+    val datesFilled: Int = 0,
+    /** "Açıldı" işaretli ürünlerden kaçına açıldıktan sonraki süre yazıldı. */
+    val openedFilled: Int = 0
 ) {
-    val total get() = itemsChanged + categoriesAdded + categoriesEdited + shelfLifeUpdated + datesFilled
+    val total get() =
+        itemsChanged + categoriesAdded + categoriesEdited + shelfLifeUpdated + datesFilled + openedFilled
 }
 
 /**
@@ -39,7 +42,8 @@ object CategoryFixer {
 
         return GeminiClient.reviewInventory(
             key, model, currentCats, items.map { it.id to it.name }, ShelfLifeStore.all,
-            datelessNames = items.filter { it.expiryDate.isBlank() }.map { it.name }
+            datelessNames = items.filter { it.expiryDate.isBlank() }.map { it.name },
+            openedItems = items.filter { it.opened }.map { it.id to it.name }
         ).map { review ->
                 // 1) Kategori ekleme/düzenleme
                 val existingById = currentCats.associateBy { it.id }
@@ -62,6 +66,7 @@ object CategoryFixer {
                 val validIds = (currentCats.map { it.id } + review.categories.map { it.id }).toSet()
                 var changed = 0
                 var datesFilled = 0
+                var openedFilled = 0
                 items.forEach { item ->
                     var updated = item
 
@@ -90,10 +95,20 @@ object CategoryFixer {
                         }
                     }
 
+                    // Açılmış ürünlerde asıl kritik süre "açıldıktan sonra kaç gün".
+                    if (item.opened) {
+                        val openedDays = review.itemOpenedDays[item.id]
+                            ?: ShelfLifeStore.guessOpened(item.name, item.category)
+                        if (openedDays != null && openedDays > 0 && openedDays != item.openedDays) {
+                            updated = updated.copy(openedDays = openedDays)
+                            openedFilled++
+                        }
+                    }
+
                     if (updated != item) Repository.save(updated)
                 }
 
-                FixSummary(changed, added, edited, review.shelfLife.size, datesFilled)
+                FixSummary(changed, added, edited, review.shelfLife.size, datesFilled, openedFilled)
             }
     }
 }

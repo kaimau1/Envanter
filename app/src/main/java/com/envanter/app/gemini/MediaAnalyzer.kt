@@ -14,6 +14,18 @@ import kotlinx.coroutines.tasks.await
 import java.io.File
 
 /**
+ * "Basılı tut, konuş" çıktısı: ya cihazın tanıyıcısından gelen metin,
+ * ya da doğrudan Gemini'ye dinletilecek ses kaydı.
+ */
+sealed interface VoiceInput {
+    data class Text(val text: String) : VoiceInput
+    data class Audio(val file: File, val mime: String, val seconds: Int) : VoiceInput
+}
+
+/** Çözümlenmiş ses: duyulan cümle + içinden çıkan ürünler. */
+data class VoiceResult(val transcript: String, val products: List<ParsedProduct>)
+
+/**
  * Fotoğraf / video / konuşma girdilerinden BİRDEN FAZLA ürün çıkarır.
  * Gemini anahtarı varsa Gemini kullanılır; yoksa cihaz-içi OCR ve metin
  * ayrıştırıcısıyla elden geldiğince sonuç üretilir.
@@ -115,6 +127,54 @@ object MediaAnalyzer {
         GeminiClient.extractManyFromText(key, model, text)
             .getOrElse { TextParse.parseSpeechMany(text) }
             .ifEmpty { TextParse.parseSpeechMany(text) }
+    }
+
+    /**
+     * "Basılı tut, konuş" sonucunu çözümler. İki kaynak da aynı yerden geçsin diye
+     * tek giriş noktası: ses kaydı doğrudan Gemini'ye dinletilir (konuşma kesilmez),
+     * anahtar yoksa cihazın tanıyıcısından gelen metin ayrıştırılır.
+     */
+    suspend fun fromVoice(
+        context: Context,
+        input: VoiceInput,
+        onStatus: (String) -> Unit = {}
+    ): Result<VoiceResult> = runCatching {
+        when (input) {
+            is VoiceInput.Text -> {
+                val products = fromSpeech(context, input.text, onStatus).getOrThrow()
+                VoiceResult(input.text, products)
+            }
+            is VoiceInput.Audio -> {
+                val key = Settings.geminiKey(context).first()
+                val bytes = input.file.takeIf { it.length() > 0 }?.readBytes()
+                    ?: error("Ses kaydı okunamadı, tekrar dene.")
+                if (key.isBlank()) error("Ses kaydını çözmek için Ayarlar'dan Gemini API anahtarı gerekir.")
+                val model = Settings.geminiModel(context).first()
+                onStatus("Gemini kaydı dinliyor… (${input.seconds} sn)")
+                val understood = GeminiClient
+                    .extractManyFromAudio(key, model, bytes, input.mime)
+                    .getOrThrow()
+                // Ürün çıkmadıysa duyulan cümleyi metin olarak bir kez daha dene:
+                // "iki ekmek aldım" gibi kısa cümlelerde yerel ayrıştırıcı da iş görür.
+                val products = understood.products.ifEmpty {
+                    if (understood.transcript.isBlank()) emptyList()
+                    else TextParse.parseSpeechMany(understood.transcript)
+                }
+                VoiceResult(understood.transcript, products)
+            }
+        }
+    }
+
+    /**
+     * Paketi açılan ürünün kaç gün içinde tüketilmesi gerektiğini Gemini'ye sorar.
+     * Anahtar yoksa ya da istek başarısız olursa null döner; çağıran taraf zaten
+     * yerel tahminle işaretlemeyi yapmış olur.
+     */
+    suspend fun openedShelfLife(context: Context, name: String, categoryLabel: String): Int? {
+        val key = Settings.geminiKey(context).first()
+        if (key.isBlank() || name.isBlank()) return null
+        val model = Settings.geminiModel(context).first()
+        return GeminiClient.openedShelfLife(key, model, name, categoryLabel).getOrNull()
     }
 
     private suspend fun ocr(context: Context, uri: Uri): ParsedProduct? = runCatching {

@@ -1,5 +1,6 @@
 package com.envanter.app.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,14 +11,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
@@ -36,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.envanter.app.data.HomeStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.SortOption
 import com.envanter.app.data.Urgency
@@ -47,6 +52,9 @@ import com.envanter.app.data.Urgency
 @Composable
 fun DashboardScreen(nav: NavHostController) {
     val items by Repository.observeItems().collectAsState(initial = emptyList())
+    val homes by HomeStore.flow.collectAsState()
+    val activeHomeId by HomeStore.activeId.collectAsState()
+    val activeHome = homes.firstOrNull { it.id == activeHomeId } ?: HomeStore.DEFAULT
     val expired = items.filter { it.urgency == Urgency.EXPIRED }
     val red = items.filter { it.urgency == Urgency.RED }
     val yellow = items.filter { it.urgency == Urgency.YELLOW }
@@ -70,11 +78,33 @@ fun DashboardScreen(nav: NavHostController) {
                 modifier = Modifier.padding(start = 16.dp, top = 16.dp)
             )
             Text(
-                "Mutfağında ${items.size} ürün var",
+                "${activeHome.title} • ${items.size} ürün",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
             )
+        }
+        // Her evin kendi envanteri var: buradan seçilen ev tüm uygulamada geçerli olur.
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                homes.forEach { home ->
+                    FilterChip(
+                        selected = home.id == activeHome.id,
+                        onClick = { Repository.setActiveHome(home.id) },
+                        label = { Text(home.title, fontSize = 13.sp, maxLines = 1) }
+                    )
+                }
+                AssistChip(
+                    onClick = { nav.navigate("homes") },
+                    label = { Text("＋ Ev", fontSize = 13.sp) }
+                )
+            }
         }
         item {
             Row(

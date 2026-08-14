@@ -7,11 +7,15 @@ sade ve pratik bir Android uygulaması.
 
 - **🎤 Basılı tut, konuş (en pratik yol):** ana sayfanın sağ alt köşesindeki mikrofon
   tuşuna basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz), parmağını çekince
-  konuşmayı analiz eder. **Parmak basılı olduğu sürece kesilmez:** cihazın ses
-  tanıyıcısı sessizlikte oturumu kapatsa bile metin biriktirilip dinleme sürdürülür,
-  yani cümleler arasında rahatça durabilirsin. Tek üründe de, "2 litre süt, 3 adet yumurta ve bir paket ekmek"
-  gibi çok üründe de çalışır. Onay ekranı **ancak analiz bittikten sonra** açılır,
-  böylece konuşurken araya ekran girmez. Konuştuğun metin tuşun üstünde canlı görünür.
+  konuşmayı analiz eder. **Parmak basılı olduğu sürece kesilmez:** Gemini anahtarı
+  girildiyse ses doğrudan kaydedilip kayıt Gemini'ye dinletilir — cihazın ses
+  tanıyıcısı hiç devreye girmediği için sessizlikte oturum kapanması, yeniden
+  başlatma boşluğu ve yarıda kesilme diye bir şey yoktur; cümleler arasında
+  istediğin kadar durabilirsin. (Anahtar yoksa cihazın tanıyıcısı kullanılır ve
+  metin biriktirilerek sürdürülür.) Tuş basılıyken parmağın kaysa ya da liste
+  kaymaya çalışsa bile basış iptal edilmez. Tek üründe de, "2 litre süt, 3 adet
+  yumurta ve bir paket ekmek" gibi çok üründe de çalışır. Onay ekranı **ancak
+  analiz bittikten sonra** açılır.
 - **Tek satırda dört ekleme yolu:** ✏️ elle, 📷 fotoğrafla, 🎥 videoyla, 🎤 sesle.
   Ayrı "çoklu ekleme" tuşu yok — **kaç ürün olduğunu sistem kendisi ayırt eder:**
   tek ürün çıkarsa doğrudan ekleme formu, birden fazla çıkarsa kontrol listesi açılır.
@@ -47,6 +51,27 @@ sade ve pratik bir Android uygulaması.
   - Analiz sırasında videonun süresi ve **tahmini token tüketimi** ekranda gösterilir
   - Not: 720p'ye inmek dosyayı küçültür ama token'ı azaltmaz — Gemini kareleri
     zaten kendi içinde küçültüyor. Token'ı azaltan şey kısa video ve seyrek kare örnekleme.
+- **📂 Paketi açıldı işareti (paketli ürünler için) + AI desteği:** listede paketli
+  ürünlerin yanındaki kilit tuşuna dokununca ürün "açıldı" olarak işaretlenir.
+  O andan itibaren geçerli tarih paketin üzerindeki tarih değil, **açıldıktan
+  sonraki süredir**: kapalıyken 6 ay dayanan salça açılınca ~20 güne, süt 3 güne
+  düşer ve renk uyarıları buna göre hesaplanır.
+  - Süre önce yerel tabloyla anında atanır, ardından **Gemini o ürüne özel doğru
+    süreyi** arka planda söyler (ör. "Sütaş beyaz peynir 500g" → 10 gün)
+  - Ekleme/düzenleme ekranında "Paketi açıldı" anahtarı, açılış özeti ve gün
+    sayısını elle düzeltme alanı var ("✨ Gemini'ye sor" ile yeniden sorulabilir)
+  - "Gemini ile kategorileri düzelt" tek istekte açılmış ürünlerin sürelerini de
+    doldurur; asistan da açılmış ürünleri öncelikli tüketilecek sayar
+- **🏠 Ayrı evler — her evin kendi sayfası:** yazlık, ofis, anneannenin evi… her ev
+  kendi envanterine, kendi sayaçlarına ve kendi uyarılarına sahiptir. Ana sayfanın
+  üstündeki ev şeritlerinden dokunarak evler arasında geçersin; **＋ Ev** ile yeni ev
+  eklenir (Ayarlar → Evleri Yönet'ten de ad/simge değiştirilir, ev silinir).
+  - Seçili ev tüm uygulamada geçerlidir: ana sayfa, envanter, asistan ve widget
+  - Ürün eklerken/düzenlerken "Ev" alanından ürün başka bir eve taşınabilir
+  - Bildirimler ev-üstüdür: hangi evde olursa olsun tarihi kritikleşen ürün uyarır
+    (birden fazla ev varsa ürünün önünde evin simgesi yazar)
+  - Ev silinirse ürünleri silinmez, kalan eve taşınır; son ev silinemez
+  - Firebase açıksa evler de cihazlar arasında eşitlenir
 - **Tarihi olmayan ürünler de ana sayfada görünür** (tarih sıralamalarında en sona düşerler);
   başlıkta kaç ürünün tarihi eksik olduğu yazar, dokununca tarih ekleyebilirsin
 - **Renk kodlu envanter:** tarihi çok yaklaşan/geçen ürünler 🔴 kırmızı, yaklaşanlar 🟡 sarı,
@@ -121,8 +146,9 @@ Ayrıca repoyu **Watch → Custom → Releases** yaparsan GitHub da her release'
 ## Teknik
 
 - Kotlin + Jetpack Compose (Material 3), tek modül
-- Room (yerel veritabanı, çevrimdışı-öncelikli) + Firestore (senkron)
-- ML Kit cihaz-içi OCR, Android ses tanıma, Gemini REST API
+- Room (yerel veritabanı, çevrimdışı-öncelikli; evler/ürünler/kategoriler/raf ömrü) + Firestore (senkron)
+- ML Kit cihaz-içi OCR, MediaRecorder ile AAC ses kaydı (Gemini'ye inline gönderilir),
+  Android ses tanıma (yedek), Gemini REST API
   (çoklu görsel `inline_data`, video için Files API resumable upload,
   `videoMetadata.fps` + `generationConfig.mediaResolution` ile token ayarı)
 - Android Photo Picker (izin gerektirmez), kamera foto çekimi (FileProvider),

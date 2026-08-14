@@ -1,7 +1,6 @@
 package com.envanter.app.ui
 
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +26,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.envanter.app.data.DraftStore
@@ -39,11 +37,11 @@ import kotlinx.coroutines.withTimeout
 /**
  * Sağ alt köşedeki "basılı tut, konuş" mikrofon tuşu — uygulamanın en kısa yolu.
  *
- * Basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz). Parmak basılı olduğu
- * sürece dinlemeye devam eder: cihazın tanıyıcısı sessizlikte oturumu kapatsa
- * bile metin biriktirilip dinleme sürdürülür, yani cümleler arasında durabilir
- * ve konuşman kesilmez. Analiz ve onay ekranı ancak parmağı çekince başlar.
- * Tek ürün de, tek seferde sayılan birden fazla ürün de desteklenir.
+ * Basar basmaz dinlemeye başlar (sistem diyaloğu açılmaz) ve parmak basılı olduğu
+ * SÜRECE kesilmez: Gemini anahtarı varsa ses doğrudan kaydedilip bırakınca
+ * Gemini'ye dinletilir, yani cihazın ses tanıyıcısının sessizlikte oturumu
+ * kapatması diye bir sorun kalmaz. Analiz ve onay ekranı ancak parmağı çekince
+ * başlar. Tek ürün de, tek seferde sayılan birden fazla ürün de desteklenir.
  */
 @Composable
 fun VoiceHoldFab(
@@ -57,28 +55,35 @@ fun VoiceHoldFab(
 
     var analyzeMessage by remember { mutableStateOf("") }
 
-    // Analiz parmak çekildikten sonra, biriken metnin tamamıyla bir kez çalışır.
-    val voice = rememberHoldToTalk { text ->
+    // Analiz parmak çekildikten sonra, kaydın/metnin tamamıyla bir kez çalışır.
+    val voice = rememberHoldToTalk { input ->
         scope.launch {
             analyzing = true
             analyzeMessage = "İşleniyor…"
-            val products = try {
-                withTimeout(90_000) {
-                    MediaAnalyzer.fromSpeech(context, text) { analyzeMessage = it }
-                        .getOrElse { emptyList() }
+            val result = try {
+                withTimeout(120_000) {
+                    MediaAnalyzer.fromVoice(context, input) { analyzeMessage = it }
                 }
             } catch (e: TimeoutCancellationException) {
-                emptyList()
+                Result.failure(IllegalStateException("Analiz zaman aşımına uğradı, tekrar dene."))
             } finally {
                 analyzing = false
             }
-            if (products.isEmpty()) {
-                analyzeMessage = "\"$text\" içinde ürün bulunamadı, tekrar dene."
-                return@launch
-            }
-            analyzeMessage = ""
-            DraftStore.addParsed(products, "ses")
-            onReady()
+            result
+                .onSuccess { voiceResult ->
+                    if (voiceResult.products.isEmpty()) {
+                        analyzeMessage = if (voiceResult.transcript.isBlank()) {
+                            "Konuşma anlaşılamadı, tekrar dene."
+                        } else {
+                            "\"${voiceResult.transcript}\" içinde ürün bulunamadı, tekrar dene."
+                        }
+                        return@onSuccess
+                    }
+                    analyzeMessage = ""
+                    DraftStore.addParsed(voiceResult.products, "ses")
+                    onReady()
+                }
+                .onFailure { analyzeMessage = it.message ?: "Ses çözümlenemedi, tekrar dene." }
         }
     }
 
@@ -119,18 +124,16 @@ fun VoiceHoldFab(
             shadowElevation = 6.dp,
             modifier = Modifier
                 .size(diameter)
-                .pointerInput(analyzing) {
-                    detectTapGestures(
-                        onPress = {
-                            if (!analyzing) {
-                                analyzeMessage = ""
-                                voice.press()
-                                tryAwaitRelease()
-                                voice.release()
-                            }
-                        }
-                    )
-                }
+                // Parmak kaysa bile basış iptal edilmez; dinleme ancak parmak
+                // kalkınca biter.
+                .holdToTalkGesture(
+                    enabled = !analyzing,
+                    onPress = {
+                        analyzeMessage = ""
+                        voice.press()
+                    },
+                    onRelease = { voice.release() }
+                )
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(

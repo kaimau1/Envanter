@@ -31,7 +31,10 @@ import com.envanter.app.MainActivity
 import com.envanter.app.data.AppDb
 import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.FoodItem
+import com.envanter.app.data.HomeStore
+import com.envanter.app.data.Settings
 import com.envanter.app.data.Urgency
+import kotlinx.coroutines.flow.first
 
 /**
  * Ana ekran widget'ı: tarihi en yakın ürünler + hızlı ekleme.
@@ -45,9 +48,15 @@ class ExpiringWidget : GlanceAppWidget() {
             val cats = AppDb.get(context).categoryDao().getAll()
             if (cats.isNotEmpty()) CategoryStore.update(cats)
         }
+        // Widget de açık evin envanterini gösterir (uygulamayla aynı ev).
+        val home = runCatching {
+            val homes = AppDb.get(context).homeDao().getAll()
+            if (homes.isNotEmpty()) HomeStore.update(homes)
+            Settings.activeHome(context).first().ifBlank { HomeStore.activeId.value }
+        }.getOrDefault(HomeStore.DEFAULT_ID)
         val items = runCatching {
             AppDb.get(context).foodDao().getAll()
-                .filter { it.daysLeft != null }
+                .filter { HomeStore.homeOf(it) == home && it.daysLeft != null }
                 .sortedBy { it.daysLeft }
                 .take(5)
         }.getOrDefault(emptyList())

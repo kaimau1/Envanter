@@ -7,8 +7,6 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,6 +24,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -52,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.FileProvider
@@ -59,12 +61,14 @@ import androidx.navigation.NavHostController
 import com.envanter.app.data.CategoryStore
 import com.envanter.app.data.DraftStore
 import com.envanter.app.data.FoodItem
+import com.envanter.app.data.HomeStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import com.envanter.app.data.ShelfLifeStore
 import com.envanter.app.data.UNITS
 import com.envanter.app.data.VoiceMode
 import com.envanter.app.gemini.MediaAnalyzer
+import com.envanter.app.gemini.VoiceInput
 import com.envanter.app.util.ParsedProduct
 import com.envanter.app.util.TextParse
 import kotlinx.coroutines.launch
@@ -86,12 +90,20 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
     val scope = rememberCoroutineScope()
 
     val categories by CategoryStore.flow.collectAsState()
+    val homes by HomeStore.flow.collectAsState()
+    val activeHomeId by HomeStore.activeId.collectAsState()
     var name by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf(CategoryStore.DEFAULT_ID) }
     var qtyText by rememberSaveable { mutableStateOf("1") }
     var unit by rememberSaveable { mutableStateOf("adet") }
     var expiry by rememberSaveable { mutableStateOf("") }
     var note by rememberSaveable { mutableStateOf("") }
+    // Paketli ürünlerde asıl kritik tarih: açıldıktan sonra kaç gün kaldığı.
+    var openedDate by rememberSaveable { mutableStateOf("") }
+    var openedDays by rememberSaveable { mutableStateOf(0) }
+    var openedBusy by remember { mutableStateOf(false) }
+    var homeId by rememberSaveable { mutableStateOf("") }
+    var homeExpanded by remember { mutableStateOf(false) }
     var loaded by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
@@ -114,10 +126,33 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 qtyText = fmtQty(it.quantity); unit = it.unit
                 expiry = it.expiryDate; note = it.note
                 expiryAutoDays = it.expiryAutoDays
+                openedDate = it.openedDate
+                openedDays = it.openedDays
+                homeId = HomeStore.homeOf(it)
                 userTouchedCategory = true
                 userTouchedExpiry = true
             }
             loaded = true
+        }
+    }
+
+    // Yeni ürün açık evin envanterine girer (istenirse aşağıdan değiştirilebilir).
+    LaunchedEffect(activeHomeId) {
+        if (!isEdit && homeId.isBlank()) homeId = activeHomeId
+    }
+
+    /** "Açıldı" işaretlenince: önce yerel tahmin, sonra (varsa) Gemini'nin doğrusu. */
+    fun markOpened() {
+        openedDate = LocalDate.now().toString()
+        openedDays = ShelfLifeStore.guessOpened(name, category) ?: 0
+        val product = name.trim()
+        if (product.isBlank()) return
+        val label = CategoryStore.byId(category).label
+        scope.launch {
+            openedBusy = true
+            val days = runCatching { MediaAnalyzer.openedShelfLife(context, product, label) }.getOrNull()
+            openedBusy = false
+            if (days != null && days > 0 && openedDate.isNotBlank()) openedDays = days
         }
     }
 
@@ -182,6 +217,26 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
         }
     }
 
+    /** Basılı-tut sonucunu (ses kaydı ya da metin) çözümler. */
+    suspend fun analyzeVoice(input: VoiceInput) {
+        busy = true
+        status = "İşleniyor…"
+        val result = MediaAnalyzer.fromVoice(context, input) { status = it }
+        busy = false
+        result
+            .onSuccess { voice ->
+                val products = voice.products
+                when {
+                    products.size > 1 -> goBatch(products, "ses")
+                    products.size == 1 -> applyParsed(products.first())
+                    voice.transcript.isNotBlank() ->
+                        status = "\"${voice.transcript}\" içinde ürün bulunamadı, elle doldurabilirsin."
+                    else -> applyParsed(ParsedProduct())
+                }
+            }
+            .onFailure { status = it.message ?: "Ses çözümlenemedi." }
+    }
+
     val photoFile = remember { photoUri(context) }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         if (ok) scope.launch { analyzePhoto(photoFile.second) }
@@ -206,17 +261,10 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
             .onFailure { status = "Ses tanıma bu cihazda kullanılamıyor." }
     }
 
-    // Basılı-tut modu: sistem diyaloğu yerine SpeechRecognizer doğrudan sürülür.
-    // Parmak basılı olduğu sürece dinlenir (sessizlikte kesilmez), çekilince analiz edilir.
+    // Basılı-tut modu: sistem diyaloğu açılmaz, parmak basılı olduğu sürece dinlenir.
+    // Basış kaydırılabilir formun içinde iptal edilmesin diye özel hareket kullanılır.
     val voiceMode by Settings.voiceMode(context).collectAsState(initial = VoiceMode.TAP)
-    val holdInteraction = remember { MutableInteractionSource() }
-    val isHoldPressed by holdInteraction.collectIsPressedAsState()
-    val holdVoice = rememberHoldToTalk { text -> scope.launch { analyzeSpeech(text) } }
-    LaunchedEffect(isHoldPressed) {
-        if (voiceMode == VoiceMode.HOLD) {
-            if (isHoldPressed) holdVoice.press() else holdVoice.release()
-        }
-    }
+    val holdVoice = rememberHoldToTalk { input -> scope.launch { analyzeVoice(input) } }
     // Dinlerken duyulan metni/durumu aynı satırda göster.
     val holdStatus = if (voiceMode == VoiceMode.HOLD && holdVoice.listening) {
         holdVoice.heard.ifBlank { holdVoice.message }
@@ -291,8 +339,15 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 }
                 OutlinedButton(
                     onClick = { if (voiceMode == VoiceMode.TAP) launchSpeech() },
-                    interactionSource = holdInteraction,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (voiceMode == VoiceMode.HOLD) Modifier.holdToTalkGesture(
+                                enabled = !busy,
+                                onPress = { holdVoice.press() },
+                                onRelease = { holdVoice.release() }
+                            ) else Modifier
+                        ),
                     enabled = !busy
                 ) {
                     Icon(Icons.Filled.KeyboardVoice, null)
@@ -378,6 +433,33 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 }
             }
 
+            // Birden fazla ev varsa ürünün hangi evin envanterine gireceği seçilebilir.
+            if (homes.size > 1) {
+                Box {
+                    OutlinedTextField(
+                        value = (HomeStore.byId(homeId) ?: HomeStore.active).title,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Ev") },
+                        trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .clickable { homeExpanded = true }
+                    )
+                    DropdownMenu(expanded = homeExpanded, onDismissRequest = { homeExpanded = false }) {
+                        homes.forEach { home ->
+                            DropdownMenuItem(
+                                text = { Text(home.title) },
+                                onClick = { homeId = home.id; homeExpanded = false }
+                            )
+                        }
+                    }
+                }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = qtyText,
@@ -435,6 +517,56 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                 }
             )
 
+            // ---- Paketli ürünler: "açıldı" işareti ----
+            // Kapalıyken aylarca duran salça/konserve açıldıktan sonra günler içinde
+            // bozulur; işaretlenince kalan gün buna göre hesaplanır.
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("📂 Paketi açıldı", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (openedDate.isBlank())
+                                    "Açtığında işaretle: kalan süre açılış tarihine göre hesaplanır."
+                                else openedSummary(openedDate, openedDays),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (openedBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Switch(
+                            checked = openedDate.isNotBlank(),
+                            onCheckedChange = { on ->
+                                if (on) markOpened() else { openedDate = ""; openedDays = 0 }
+                            }
+                        )
+                    }
+                    if (openedDate.isNotBlank()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = if (openedDays > 0) openedDays.toString() else "",
+                                onValueChange = { v ->
+                                    openedDays = v.filter { c -> c.isDigit() }.take(4).toIntOrNull() ?: 0
+                                },
+                                label = { Text("Açıldıktan sonra (gün)") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = { markOpened() },
+                                enabled = !openedBusy && name.isNotBlank()
+                            ) { Text("✨ Gemini'ye sor") }
+                        }
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = note,
                 onValueChange = { note = it },
@@ -462,7 +594,10 @@ fun AddEditScreen(nav: NavHostController, itemId: String?, mode: String = "") {
                                 unit = unit,
                                 expiryDate = expiry,
                                 expiryAutoDays = expiryAutoDays,
-                                note = note.trim()
+                                note = note.trim(),
+                                openedDate = openedDate,
+                                openedDays = openedDays,
+                                homeId = homeId.ifBlank { HomeStore.activeId.value }
                             )
                         )
                         nav.popBackStack()
