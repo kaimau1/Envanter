@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.envanter.app.data.CategoryDef
 import com.envanter.app.data.CategoryStore
+import com.envanter.app.data.HomeStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.SortOption
 import com.envanter.app.data.Urgency
@@ -57,6 +58,9 @@ import com.envanter.app.util.Fuzzy
 fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
     val all by Repository.observeItems().collectAsState(initial = emptyList())
     val categories by CategoryStore.flow.collectAsState()
+    val homes by HomeStore.flow.collectAsState()
+    val activeHomeId by HomeStore.activeId.collectAsState()
+    val activeHome = homes.firstOrNull { it.id == activeHomeId } ?: HomeStore.DEFAULT
 
     var query by remember { mutableStateOf("") }
     var selectedCatId by remember { mutableStateOf<String?>(null) }
@@ -80,6 +84,13 @@ fun InventoryScreen(nav: NavHostController, urgencyArg: String = "") {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
+            // Envanter her zaman AÇIK EVİN envanteridir; hangi ev olduğu görünsün.
+            Text(
+                "${activeHome.title} envanteri" + if (homes.size > 1) " • ev değiştirmek için ana sayfa" else "",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, top = 10.dp)
+            )
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },

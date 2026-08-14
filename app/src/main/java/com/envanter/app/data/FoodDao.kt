@@ -68,6 +68,42 @@ interface CategoryDao {
 }
 
 @Dao
+interface HomeDao {
+    @Query("SELECT * FROM homes WHERE deleted = 0 ORDER BY sortOrder")
+    fun observeAll(): Flow<List<Home>>
+
+    @Query("SELECT * FROM homes WHERE deleted = 0 ORDER BY sortOrder")
+    suspend fun getAll(): List<Home>
+
+    @Query("SELECT * FROM homes")
+    suspend fun getAllIncludingDeleted(): List<Home>
+
+    @Query("SELECT * FROM homes WHERE id = :id")
+    suspend fun get(id: String): Home?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(home: Home)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(homes: List<Home>)
+
+    @Query("SELECT COUNT(*) FROM homes")
+    suspend fun count(): Int
+
+    /**
+     * Silinen evin ürünlerini başka bir eve taşır (ürünler kaybolmasın).
+     * [alsoSource] eski, evsiz kayıtlar içindir: boş homeId varsayılan eve sayılır.
+     */
+    @Query("UPDATE items SET homeId = :target, updatedAt = :stamp WHERE homeId = :source OR homeId = :alsoSource")
+    suspend fun moveItems(
+        source: String,
+        target: String,
+        alsoSource: String = source,
+        stamp: Long = System.currentTimeMillis()
+    )
+}
+
+@Dao
 interface ShelfLifeDao {
     @Query("SELECT * FROM shelf_life")
     fun observeAll(): Flow<List<ShelfLife>>
@@ -82,11 +118,16 @@ interface ShelfLifeDao {
     suspend fun count(): Int
 }
 
-@Database(entities = [FoodItem::class, CategoryDef::class, ShelfLife::class], version = 4, exportSchema = false)
+@Database(
+    entities = [FoodItem::class, CategoryDef::class, ShelfLife::class, Home::class],
+    version = 5,
+    exportSchema = false
+)
 abstract class AppDb : RoomDatabase() {
     abstract fun foodDao(): FoodDao
     abstract fun categoryDao(): CategoryDao
     abstract fun shelfLifeDao(): ShelfLifeDao
+    abstract fun homeDao(): HomeDao
 
     companion object {
         /** items tablosunu koruyarak categories tablosunu ekler. */
@@ -123,11 +164,39 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        /**
+         * "Açıldı" işareti ve çoklu ev desteği: ürünlere açılma tarihi/süresi ve
+         * ev kimliği, raf ömrü tablosuna açıldıktan sonraki gün sayısı eklenir.
+         * Mevcut ürünler varsayılan eve ([HomeStore.DEFAULT_ID]) bağlanır.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE items ADD COLUMN openedDate TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE items ADD COLUMN openedDays INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE items ADD COLUMN homeId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE shelf_life ADD COLUMN openedDays INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS homes (" +
+                        "id TEXT NOT NULL PRIMARY KEY, " +
+                        "name TEXT NOT NULL, " +
+                        "emoji TEXT NOT NULL, " +
+                        "sortOrder INTEGER NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL, " +
+                        "deleted INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO homes (id, name, emoji, sortOrder, updatedAt, deleted) " +
+                        "VALUES ('${HomeStore.DEFAULT_ID}', 'Evim', '🏠', 0, ${System.currentTimeMillis()}, 0)"
+                )
+                db.execSQL("UPDATE items SET homeId = '${HomeStore.DEFAULT_ID}' WHERE homeId = ''")
+            }
+        }
+
         @Volatile private var INSTANCE: AppDb? = null
         fun get(context: Context): AppDb =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDb::class.java, "envanter.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

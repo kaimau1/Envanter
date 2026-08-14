@@ -14,7 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,8 +45,10 @@ import com.envanter.app.data.FoodItem
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Urgency
 import com.envanter.app.gemini.CategoryFixer
+import com.envanter.app.gemini.OpenedAdvisor
 import com.envanter.app.util.TextParse
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /**
  * "Gemini ile kategorileri düzelt" butonu (ana sayfa ve envanterde ortak).
@@ -75,6 +79,7 @@ fun GeminiFixButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
                                 if (s.categoriesEdited > 0) parts += "${s.categoriesEdited} kategori eşiği düzeltildi"
                                 if (s.shelfLifeUpdated > 0) parts += "${s.shelfLifeUpdated} ürün raf ömrü güncellendi"
                                 if (s.datesFilled > 0) parts += "${s.datesFilled} ürüne tarih atandı"
+                                if (s.openedFilled > 0) parts += "${s.openedFilled} açılmış ürünün süresi güncellendi"
                                 append(parts.joinToString(", "))
                             }
                         }
@@ -145,20 +150,33 @@ fun fmtQty(q: Double): String =
     if (q == q.toLong().toDouble()) q.toLong().toString() else q.toString()
 
 fun expiryLabel(item: FoodItem): String {
-    val d = item.daysLeft ?: return "tarih yok"
-    val date = item.expiry?.let { TextParse.formatDate(it) } ?: ""
+    val opened = if (item.opened) " • 📂 açıldı" else ""
+    val d = item.daysLeft ?: return "tarih yok$opened"
+    // Açıldıysa geçerli tarih paketinki değil, açılıştan sonraki gün sayısıdır.
+    val date = item.effectiveExpiry?.let { TextParse.formatDate(it) } ?: ""
     // Tarihi sistem tahmin ettiyse belli olsun; kullanıcının verdiği tarih işaretlenmez.
-    val auto = if (item.expiryAutoDays > 0) " • ~tahmini" else ""
+    val auto = if (item.expiryAutoDays > 0 && !item.shortenedByOpening) " • ~tahmini" else ""
     return when {
-        d < 0 -> "$date • ${-d} gün geçti!$auto"
-        d == 0L -> "$date • BUGÜN son gün$auto"
-        d == 1L -> "$date • yarın son gün$auto"
-        else -> "$date • $d gün kaldı$auto"
+        d < 0 -> "$date • ${-d} gün geçti!$auto$opened"
+        d == 0L -> "$date • BUGÜN son gün$auto$opened"
+        d == 1L -> "$date • yarın son gün$auto$opened"
+        else -> "$date • $d gün kaldı$auto$opened"
     }
+}
+
+/** "12 Ağu'da açıldı • 5 gün içinde tüket (17 Ağu)" biçiminde özet. */
+fun openedSummary(openedDate: String, openedDays: Int): String {
+    val date = runCatching { LocalDate.parse(openedDate) }.getOrNull()
+        ?: return "Açıldı olarak işaretli"
+    val head = "${TextParse.formatDate(date)} tarihinde açıldı"
+    if (openedDays <= 0) return "$head • süre bilinmiyor, gün sayısını yazabilirsin"
+    val until = date.plusDays(openedDays.toLong())
+    return "$head • $openedDays gün içinde tüket (${TextParse.formatDate(until)})"
 }
 
 @Composable
 fun ItemRow(item: FoodItem, onClick: () -> Unit, showQuantityButtons: Boolean = true) {
+    val context = LocalContext.current
     // Aktif temanın (sistem ya da elle seçilmiş) koyu olup olmadığını yüzeyden türet.
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val bg = UrgencyColors.background(item.urgency, dark)
@@ -194,6 +212,29 @@ fun ItemRow(item: FoodItem, onClick: () -> Unit, showQuantityButtons: Boolean = 
                     color = accent ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (accent != null) FontWeight.Bold else FontWeight.Normal
                 )
+                if (item.opened) {
+                    Text(
+                        openedSummary(item.openedDate, item.openedDays),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            // Paketli ürünlerde tek dokunuşla "açıldı" işareti: kalan süre o andan
+            // itibaren açılış kuralına göre hesaplanır.
+            if (showQuantityButtons && (item.opened || item.packagedLikely)) {
+                IconButton(
+                    onClick = { OpenedAdvisor.toggle(context, item) },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        if (item.opened) Icons.Filled.LockOpen else Icons.Outlined.Lock,
+                        if (item.opened) "açıldı işaretini kaldır" else "paketi açıldı olarak işaretle",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (item.opened) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             if (showQuantityButtons) {
                 IconButton(onClick = { Repository.changeQuantity(item, -1.0) }, modifier = Modifier.size(34.dp)) {

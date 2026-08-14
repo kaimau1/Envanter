@@ -42,6 +42,7 @@ import com.envanter.app.ui.AssistantScreen
 import com.envanter.app.ui.BatchAddScreen
 import com.envanter.app.ui.DashboardScreen
 import com.envanter.app.ui.EnvanterTheme
+import com.envanter.app.ui.HomesScreen
 import com.envanter.app.ui.InventoryScreen
 import com.envanter.app.ui.SettingsScreen
 
@@ -146,7 +147,8 @@ fun AppNav(startVoice: Boolean = false, onVoiceConsumed: () -> Unit = {}) {
                 InventoryScreen(nav, entry.arguments?.getString("urgency") ?: "")
             }
             composable("assistant") { AssistantScreen() }
-            composable("settings") { SettingsScreen() }
+            composable("homes") { HomesScreen(nav) }
+            composable("settings") { SettingsScreen(nav) }
             composable(
                 "edit?mode={mode}",
                 arguments = listOf(navArgument("mode") { defaultValue = "" })

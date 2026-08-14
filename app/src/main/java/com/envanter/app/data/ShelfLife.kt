@@ -10,11 +10,15 @@ import java.time.LocalDate
  * Ürün adından tahmini raf ömrü (gün). Etiketinde son kullanma tarihi olmayan
  * taze/paketsiz ürünler (domates, patlıcan gibi) eklenirken tarih otomatik önerilir.
  * Gemini "kategorileri düzelt" isteğiyle bu listeyi de düzenleyebilir.
+ *
+ * [openedDays] paketli ürünler içindir: kapalıyken aylarca duran salça/konserve
+ * açıldıktan sonra günler içinde bozulur. 0 ise bu ürün için bilinmiyor.
  */
 @Entity(tableName = "shelf_life")
 data class ShelfLife(
     @PrimaryKey val keyword: String,
-    val days: Int
+    val days: Int,
+    val openedDays: Int = 0
 )
 
 object ShelfLifeStore {
@@ -35,8 +39,22 @@ object ShelfLifeStore {
         ShelfLife("vişne", 5), ShelfLife("nar", 21), ShelfLife("incir", 3),
         ShelfLife("avokado", 5), ShelfLife("kivi", 14), ShelfLife("ananas", 5),
         // Etiketinde tarih olsa bile açıldıktan sonra hızlı biten temel ürünler.
-        ShelfLife("peynir", 10), ShelfLife("kaşar", 14), ShelfLife("ekmek", 3),
-        ShelfLife("yumurta", 21), ShelfLife("zeytin", 21)
+        ShelfLife("peynir", 10, 10), ShelfLife("kaşar", 14, 14), ShelfLife("ekmek", 3, 2),
+        ShelfLife("yumurta", 21), ShelfLife("zeytin", 21, 30),
+        // Paketi AÇILDIKTAN sonra geçerli olan süreler (kapalı hâlleri etiketinde yazar).
+        ShelfLife("süt", 5, 3), ShelfLife("yoğurt", 10, 5), ShelfLife("ayran", 7, 2),
+        ShelfLife("krema", 10, 3), ShelfLife("tereyağı", 60, 21), ShelfLife("labne", 14, 7),
+        ShelfLife("salça", 365, 20), ShelfLife("konserve", 365, 3),
+        ShelfLife("ton balığı", 365, 2), ShelfLife("turşu", 365, 30),
+        ShelfLife("reçel", 365, 30),
+        ShelfLife("ketçap", 365, 60), ShelfLife("mayonez", 180, 30),
+        ShelfLife("hardal", 365, 90), ShelfLife("soya sosu", 730, 180),
+        ShelfLife("meyve suyu", 180, 3), ShelfLife("süzme peynir", 14, 7),
+        ShelfLife("sucuk", 60, 10), ShelfLife("salam", 30, 5), ShelfLife("sosis", 30, 4),
+        ShelfLife("çikolata", 180, 30), ShelfLife("bisküvi", 180, 14),
+        ShelfLife("cips", 120, 3), ShelfLife("kahve", 365, 60),
+        ShelfLife("un", 365, 120), ShelfLife("pirinç", 365, 180),
+        ShelfLife("makarna", 365, 180), ShelfLife("zeytinyağı", 540, 120)
     )
 
     // Varsayılanlarla başlar: Room'dan yükleme asenkron olduğu için boş başlarsa
@@ -59,8 +77,8 @@ object ShelfLifeStore {
         return d.minusDays(oldDays.toLong()).plusDays(newDays.toLong()).toString()
     }
 
-    /** Ürün adına en yakın eşleşen raf ömrünü (gün) döndürür; tahminidir, bulunamazsa null. */
-    fun guess(name: String): Int? {
+    /** Ürün adına en yakın eşleşen kaydı döndürür; bulunamazsa null. */
+    fun match(name: String): ShelfLife? {
         if (name.isBlank()) return null
         val nameNorm = CategoryStore.normalize(name)
         val nameTokens = CategoryStore.tokens(nameNorm)
@@ -71,6 +89,30 @@ object ShelfLifeStore {
             val s = CategoryStore.keywordScore(nameNorm, nameTokens, CategoryStore.normalize(entry.keyword))
             if (s > bestScore) { bestScore = s; best = entry }
         }
-        return if (bestScore >= 1.5) best?.days else null
+        return if (bestScore >= 1.5) best else null
+    }
+
+    /** Ürün adına en yakın eşleşen raf ömrünü (gün) döndürür; tahminidir, bulunamazsa null. */
+    fun guess(name: String): Int? = match(name)?.days?.takeIf { it > 0 }
+
+    /**
+     * Paketi açıldıktan sonra kaç gün içinde tüketilmeli? Tabloda kayıt yoksa
+     * kategoriye göre kaba bir varsayılan verilir (bilinmiyorsa null).
+     */
+    fun guessOpened(name: String, categoryId: String? = null): Int? {
+        match(name)?.openedDays?.takeIf { it > 0 }?.let { return it }
+        return when (categoryId) {
+            "SUT_URUNLERI" -> 5
+            "ET_TAVUK_BALIK" -> 2
+            "KONSERVE" -> 3
+            "SOS_BAHARAT" -> 60
+            "ICECEK" -> 4
+            "KAHVALTILIK" -> 14
+            "ATISTIRMALIK" -> 14
+            "EKMEK_UNLU" -> 3
+            "BAKLIYAT_KURU" -> 120
+            "DONDURULMUS" -> 30
+            else -> null
+        }
     }
 }

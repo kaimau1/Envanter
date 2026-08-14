@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.envanter.app.data.HomeStore
 import com.envanter.app.data.Repository
 import com.envanter.app.data.Settings
 import com.envanter.app.gemini.GeminiClient
@@ -42,6 +43,9 @@ fun AssistantScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val apiKey by Settings.geminiKey(context).collectAsState(initial = "")
+    val homes by HomeStore.flow.collectAsState()
+    val activeHomeId by HomeStore.activeId.collectAsState()
+    val activeHome = homes.firstOrNull { it.id == activeHomeId } ?: HomeStore.DEFAULT
     val model by Settings.geminiModel(context).collectAsState(initial = "gemini-2.0-flash")
 
     var question by remember { mutableStateOf("") }
@@ -59,11 +63,20 @@ fun AssistantScreen() {
             val items = Repository.items()
             val inventory = if (items.isEmpty()) "(envanter boş)"
             else items.joinToString("\n") { i ->
-                val date = i.expiry?.let { TextParse.formatDate(it) } ?: "tarih yok"
-                "- ${i.name} | ${fmtQty(i.quantity)} ${i.unit} | ${i.categoryEnum.label} | SKT: $date"
+                val date = i.effectiveExpiry?.let { TextParse.formatDate(it) } ?: "tarih yok"
+                // Açılmış paketler ayrıca belirtilir: "önce ne tüketeyim" cevabı buna göre değişir.
+                val opened = if (i.opened) {
+                    " | AÇILMIŞ (${i.openedDate})" +
+                        if (i.openedDays > 0) ", açıldıktan sonra ${i.openedDays} gün" else ""
+                } else ""
+                "- ${i.name} | ${fmtQty(i.quantity)} ${i.unit} | ${i.categoryEnum.label} | SKT: $date$opened"
             }
             val prompt = "Sen bir mutfak envanteri asistanısın. Türkçe, kısa ve pratik yanıt ver.\n" +
-                "Bugünün tarihi: ${java.time.LocalDate.now()}\n\nEnvanterim:\n$inventory\n\nSoru: $q"
+                "Bugünün tarihi: ${java.time.LocalDate.now()}\n" +
+                "Envanter şu evin: ${HomeStore.active.title}\n" +
+                "Not: AÇILMIŞ işaretli ürünlerde paketin üzerindeki tarih değil, açıldıktan " +
+                "sonraki süre geçerlidir; bunları öncelikli tüketilecekler arasında say.\n" +
+                "\nEnvanterim:\n$inventory\n\nSoru: $q"
             GeminiClient.generate(apiKey, model, prompt)
                 .onSuccess { answer = it }
                 .onFailure { error = "Hata: ${it.message}" }
@@ -79,6 +92,11 @@ fun AssistantScreen() {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text("✨ Gemini Asistan", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            "${activeHome.title} envanterine göre yanıtlar",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         if (apiKey.isBlank()) {
             Card {

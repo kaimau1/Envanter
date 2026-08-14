@@ -23,6 +23,7 @@ object FirebaseSync {
     private const val TAG = "FirebaseSync"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var listener: ListenerRegistration? = null
+    private var homeListener: ListenerRegistration? = null
 
     private val _status = MutableStateFlow("Başlatılmadı")
     val status: StateFlow<String> = _status
@@ -116,23 +117,29 @@ object FirebaseSync {
 
     fun signOut(context: Context) {
         listener?.remove()
+        homeListener?.remove()
         FirebaseAuth.getInstance().signOut()
         _userEmail.value = null
         start(context)
     }
 
-    private fun collection() =
+    private fun userDoc() =
         FirebaseFirestore.getInstance()
             .collection("users")
             .document(FirebaseAuth.getInstance().currentUser!!.uid)
-            .collection("items")
+
+    private fun collection() = userDoc().collection("items")
+
+    private fun homesCollection() = userDoc().collection("homes")
 
     private fun attach() {
         _status.value = "Senkron aktif"
         // Önce yereldeki her şeyi gönder (ilk kurulumda birleşme sağlar).
         scope.launch {
+            runCatching { Repository.allHomesIncludingDeleted().forEach { pushHome(it) } }
             runCatching { Repository.allIncludingDeleted().forEach { push(it) } }
         }
+        attachHomes()
         listener?.remove()
         listener = collection().addSnapshotListener { snap, e ->
             if (e != null) {
@@ -151,6 +158,9 @@ object FirebaseSync {
                         expiryDate = doc.getString("expiryDate") ?: "",
                         expiryAutoDays = (doc.getLong("expiryAutoDays") ?: 0L).toInt(),
                         note = doc.getString("note") ?: "",
+                        openedDate = doc.getString("openedDate") ?: "",
+                        openedDays = (doc.getLong("openedDays") ?: 0L).toInt(),
+                        homeId = doc.getString("homeId") ?: "",
                         updatedAt = doc.getLong("updatedAt") ?: 0L,
                         deleted = doc.getBoolean("deleted") ?: false
                     )
@@ -158,6 +168,42 @@ object FirebaseSync {
                 }
             }
         }
+    }
+
+    /** Evler ayrı bir koleksiyonda; ürünler homeId ile bunlara bağlanır. */
+    private fun attachHomes() {
+        homeListener?.remove()
+        homeListener = homesCollection().addSnapshotListener { snap, e ->
+            if (e != null || snap == null || snap.metadata.hasPendingWrites()) return@addSnapshotListener
+            scope.launch {
+                for (doc in snap.documents) {
+                    val home = Home(
+                        id = doc.id,
+                        name = doc.getString("name") ?: "",
+                        emoji = doc.getString("emoji") ?: "🏠",
+                        sortOrder = (doc.getLong("sortOrder") ?: 0L).toInt(),
+                        updatedAt = doc.getLong("updatedAt") ?: 0L,
+                        deleted = doc.getBoolean("deleted") ?: false
+                    )
+                    runCatching { Repository.applyRemoteHome(home) }
+                }
+            }
+        }
+    }
+
+    fun pushHome(home: Home) {
+        if (!isConfigured || FirebaseAuth.getInstance().currentUser == null) return
+        runCatching {
+            homesCollection().document(home.id).set(
+                mapOf(
+                    "name" to home.name,
+                    "emoji" to home.emoji,
+                    "sortOrder" to home.sortOrder,
+                    "updatedAt" to home.updatedAt,
+                    "deleted" to home.deleted
+                )
+            )
+        }.onFailure { Log.w(TAG, "home push failed", it) }
     }
 
     fun push(item: FoodItem) {
@@ -172,6 +218,9 @@ object FirebaseSync {
                     "expiryDate" to item.expiryDate,
                     "expiryAutoDays" to item.expiryAutoDays,
                     "note" to item.note,
+                    "openedDate" to item.openedDate,
+                    "openedDays" to item.openedDays,
+                    "homeId" to item.homeId,
                     "updatedAt" to item.updatedAt,
                     "deleted" to item.deleted
                 )
